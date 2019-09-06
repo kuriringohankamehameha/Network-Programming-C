@@ -8,6 +8,9 @@ int PATH_LENGTH;
 //Current Child PID
 int CURR_CHILD_PID = -1;
 int PARENT_PID;
+int background_proc = 0;
+int fg_command = 0;
+int bg_command = 0;
 
 //Shell Signal Handler
 static void shell_handler(int, siginfo_t*, void*);
@@ -175,30 +178,41 @@ int main(int argc, char* argv[])
             for(int i=0; i<ARG_LENGTH; i++)
                 arg[i] = (char*) malloc (70*sizeof(char));
             
+            int count = 0;
+            int j=0;
+            for(int i=0; buf[i]!='\0'; i++)
+            {
+                if(buf[i] == ' ')
+                {
+                    arg[count][j] = '\0';
+                    j = 0;
+                    count ++;
+                }
+
+                else
+                    arg[count][j++] = buf[i];
+            }
+            
+            arg[count][j] = '\0';
+            arg[count+1] = NULL;
+            
+            if(strcmp(arg[count], "&") == 0)
+            {
+                background_proc = 1;
+            }
+
             if(pid == 0)
             {
                 //Inside Child Process
+                if(background_proc == 1)
+                {
+                    //Add the background_proc to a process group
+                    setpgid(0, 0);
+                    signal(SIGTTOU, SIG_IGN);
+                }
                 sigprocmask(SIG_UNBLOCK, &set, NULL);
                 sigaction(SIGINT, &sa, NULL);
                 CURR_CHILD_PID = getpid();
-
-                int count = 0;
-                int j=0;
-                for(int i=0; buf[i]!='\0'; i++)
-                {
-                    if(buf[i] == ' ')
-                    {
-                        arg[count][j] = '\0';
-                        j = 0;
-                        count ++;
-                    }
-
-                    else
-                        arg[count][j++] = buf[i];
-                }
-                
-                arg[count][j] = '\0';
-                arg[count+1] = NULL;
 
                 //Now, arg is a NULL terminated Array of Strings
                 int curr = 0;
@@ -226,7 +240,15 @@ int main(int argc, char* argv[])
             }
             else
             {
-                wait(NULL);
+                if(background_proc == 1)
+                {
+                    signal(SIGTTOU, SIG_IGN);
+                    //Make the parent control the Terminal
+                    setpgrp();
+                }
+                else
+                    wait(NULL);
+                background_proc = 0;
 
                 for(int i=0; i<ARG_LENGTH; i++)
                     free(arg[i]);
