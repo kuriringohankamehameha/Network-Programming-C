@@ -10,19 +10,25 @@ int CURR_CHILD_PID = -1;
 int PARENT_PID;
 
 //Shell Signal Handler
-static void shell_handler(int);
+static void shell_handler(int, siginfo_t*, void*);
 
-static void shell_handler(int signo)
+static void shell_handler(int signo, siginfo_t* info, void* context)
 {
     //Pass the signals to the process running in the shell
-    if (CURR_CHILD_PID > 0)
+    if(signo == SIGINT)
     {
-        kill(CURR_CHILD_PID, signo);
-        kill(PARENT_PID, SIGCHLD);
+        if (CURR_CHILD_PID > 0)
+        {
+            kill(CURR_CHILD_PID, signo);
+            kill(PARENT_PID, SIGCHLD);
+        }
+        else
+        {
+            signal(signo, SIG_IGN);
+            printf("\n");
+            printf("myShell~:$ ");
+        }
     }
-    else
-        printf("\n");
-
 }
 
 void initialize_path(const char* filename)
@@ -127,9 +133,16 @@ int main(int argc, char* argv[])
     
     printf("myShell~:$ ");
 
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGINT);
+    sigaddset(&set, SIGKILL);
+
     struct sigaction sa;
     sa.sa_handler = shell_handler;
+    sa.sa_flags = SA_SIGINFO;
 
+    sigprocmask(SIG_BLOCK, &set, NULL);
     //sigaction(SIGINT, &sa, NULL);
 
     int pipefd[2];
@@ -157,15 +170,17 @@ int main(int argc, char* argv[])
             int pid = fork();
             PARENT_PID = getpid();
 
+            int ARG_LENGTH = get_args(buf) + 1;
+            char** arg = (char**) malloc (ARG_LENGTH*sizeof(char*));
+            for(int i=0; i<ARG_LENGTH; i++)
+                arg[i] = (char*) malloc (70*sizeof(char));
+            
             if(pid == 0)
             {
                 //Inside Child Process
+                sigprocmask(SIG_UNBLOCK, &set, NULL);
+                sigaction(SIGINT, &sa, NULL);
                 CURR_CHILD_PID = getpid();
-                char* op;
-                int ARG_LENGTH = get_args(buf) + 1;
-                char** arg = (char**) malloc (ARG_LENGTH*sizeof(char*));
-                for(int i=0; i<ARG_LENGTH; i++)
-                    arg[i] = (char*) malloc (70*sizeof(char));
 
                 int count = 0;
                 int j=0;
@@ -201,7 +216,6 @@ int main(int argc, char* argv[])
                         }
                     }
                 }
-                free(op);
                 for(int i=0; i<ARG_LENGTH; i++)
                 {
                     free(arg[i]);
@@ -213,6 +227,11 @@ int main(int argc, char* argv[])
             else
             {
                 wait(NULL);
+
+                for(int i=0; i<ARG_LENGTH; i++)
+                    free(arg[i]);
+                free(arg);
+
                 printf("myShell~:$ ");
                 CURR_CHILD_PID = -1;
             }
