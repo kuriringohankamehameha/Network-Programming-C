@@ -1,96 +1,129 @@
 #include "shell.h"
 
 #define MAX_NUM_PATHS 100
+#define uint32_t u_int32_t 
 
-char** PATH;
-int PATH_LENGTH;
+enum bool {false, true};
+enum _JobType {FG_JOB, BG_JOB, PEND_JOB, NONE};
 
-//Current Child PID
-int CURR_CHILD_PID = -1;
-int PARENT_PID;
-int background_proc = 0;
-int fg_command = 0;
-int bg_command = 0;
-int bg_to_fg = 0;
+typedef struct _Job_t Job;
+typedef struct _Node_t Node;
+typedef enum _JobType JobType;
+typedef enum bool bool; 
 
-static int* background_jobs;
-static int bc = 0;
+struct _Node_t{
 
-int cpipe[2];
+	int pid;
+	JobType jobtype;
 
-//Shell Signal Handler
-static void shell_handler(int, siginfo_t*, void*);
-static inline void print_prompt();
+};
 
-static void shell_handler(int signo, siginfo_t* info, void* context)
+struct _Job_t{
+
+	Node node;
+	Job* next;
+
+};
+
+// Create the struct
+Job* createJobs(Node node)
 {
-    //Pass the signals to the process running in the shell
-    if(signo == SIGINT)
-    {
-        if (CURR_CHILD_PID > 0)
-        {
-            kill(CURR_CHILD_PID, signo);
-            kill(PARENT_PID, SIGCHLD);
-        }
-        else
-        {
-            signal(signo, SIG_IGN);
-            printf("\n");
-            print_prompt();
-        }
-    }
+	Job* head = (Job*) malloc (sizeof(Job));
+	head->node = node;
+	head->next = NULL;
+
+	return head;
 }
 
-
-void initialize_path(const char* filename)
+// Insert a Job
+Job* insert(Job* head, Node node)
 {
-    //Sets the PATH from filename (the Shell config file)
-    PATH = (char**) malloc (MAX_NUM_PATHS*sizeof(char*));
-    for(int i=0; i<MAX_NUM_PATHS; i++)
-        PATH[i] = (char*) malloc (sizeof(char));
+	Job* newnode = (Job*) malloc (sizeof(Job));
+	newnode->node = node;
+	newnode->next = NULL;
 
-    char buffer[256];
-    int k = 0;
-    int j = 0;
-    FILE* file = fopen(filename, "r");
-    
-    if (!file)
-    {
-        printf("Error opening file '%s'\n", filename);
-        exit(1);
-    }
+	Job* temp = head;
+	
+	if (temp->next != NULL)
+	{
+		while (temp->next)
+		{
+			temp = temp->next;
+		}
+	}
 
-    while(fgets(buffer, sizeof(buffer), file))
-    {
-        //printf("buffer = %s",buffer);
-        for(int i=0; ; i++)
-        {
-            if(buffer[i] == '\n')
-            {
-                PATH[j][k] = '\0';
-                break;
+	if (temp->node.pid != node.pid)
+		temp->next = newnode;
+
+	return head; 
+
+}
+
+// Remove a Job
+Job* removeJob(Job* head, int pid)
+{
+	Job* temp = head;
+    if(pid < 0 || temp->node.pid == pid){
+	    head = temp->next;
+	    temp->next = NULL;
+	    free(temp);
+	    return head;
+    } else {
+        // Remove PID
+        while(temp->next){
+            if (temp->next->node.pid == pid){
+                Job* del = temp->next;
+                temp->next = del->next;
+                del->next = NULL;
+                free(del);
             }
-
             else
-                PATH[j][k++] = buffer[i];
+                temp = temp->next;
         }
-
-        j++;
-        k = 0;
+        return head;
     }
-
-    PATH_LENGTH = j;
 }
 
-int compare_strs(char* s1, char* s2)
+Job* findPID(Job* head, int pid)
 {
-    if(strlen(s1) != strlen(s2))
-        return 0;
+	Job* temp = head;
+	while (temp)
+	{
+		if (temp->node.pid == pid)
+			return temp;
+		temp = temp->next;
+	}
 
-    for(int i=0; i<strlen(s1); i++)
-        if(s1[i] != s2[i])
-            return 0;
-    return 1;
+	return NULL;
+}
+
+void printList(Job* head)
+{
+	Job* temp = head;
+	while (temp)
+	{
+		printf("pid = %d -> ", temp->node.pid);
+		temp = temp->next;
+	}
+	printf("\n");
+}
+
+// Signal Handler Prototype
+static void shellHandler(int, siginfo_t*, void*);
+void shellfgCommand(int pid);
+
+// Global Variables for Process Flow
+char** PATH; // PATH Variable
+JobType processType = NONE;
+pid_t childPID, parentPID;
+bool isBackground = false;
+
+// Initialize the jobSet
+static Job* jobSet; 
+
+static inline void printPrompt()
+{
+    printf("myShell~: $ ");
 }
 
 char* str_concat(char* s1, char* s2)
@@ -106,267 +139,377 @@ char* str_concat(char* s1, char* s2)
     return op;
 }
 
-int get_args(char* s)
+static void shellHandler(int signo, siginfo_t* info, void* context)
 {
-    int c = 0;
-    for(int i=0; s[i]!='\0'; i++)
-        if(s[i] == ' ')
-            c++;
-    return c;
+	// Passes it into the child first
+	if (signo == SIGINT || signo == SIGKILL)
+	{
+		kill(childPID, signo);
+		kill(parentPID, SIGCHLD);
+	}
+
+	else
+	{
+		signal(signo, SIG_IGN);
+		printf("\n");
+		printPrompt();
+	}
 }
 
-void clear_terminal()
+uint32_t setPATH(const char* filename)
 {
-    for(int i=0; i<200; i++)
-        printf("\n");
+	// Sets the PATH Variable from the config file
+	// and returns it's length
+
+	PATH = (char**) malloc (MAX_NUM_PATHS*sizeof(char*));
+	for (uint32_t i=0; i<MAX_NUM_PATHS; i++)
+		PATH[i] = (char*) malloc (sizeof(char));
+
+	char buffer[256];
+	FILE* fp = fopen(filename, "r");
+	uint32_t pathLength = 0;
+	uint32_t j = 0;
+
+	if (!fp)
+	{
+		printf("Error opening file '%s'\n", filename);
+		exit(1);
+	}
+
+	while (fgets(buffer, sizeof(buffer), fp))
+	{
+		for (uint32_t i=0; ; i++)
+		{
+			if (buffer[i] == '\n')
+			{
+				PATH[pathLength][j] = '\0';
+				break;
+			}
+			else
+				PATH[pathLength][j++] = buffer[i];
+		}
+
+		pathLength++;
+		j = 0;
+	}
+
+	return pathLength;
 }
 
-int custom_command(char* command)
+sigset_t createSignalSet(int* signalArray)
 {
-    if(strcmp(command, "clear") == 0)
-    {
-       clear_terminal();    
-       return 1;
-    }
-    
-    else if(strcmp(command, "fg") == 0)
-    {
-        if(bc == 0)
+	sigset_t set;
+	sigemptyset(&set);
+	for(int i=0; signalArray[i]!=-1; i++)
+		sigaddset(&set, signalArray[i]);
+	return set;	
+}
+
+void freePATH()
+{
+	// Release the PATH!!
+	for (uint32_t i=0; i<MAX_NUM_PATHS; i++)
+		free(PATH[i]);
+	free(PATH);
+}
+
+uint32_t getArgumentLength(char* command)
+{
+	int count = 1;
+	for(uint32_t i=0; command[i] != '\0'; i++)
+		if(command[i] == ' ')
+			count ++;
+	return count;
+}
+
+int bulletin(char* command)
+{
+	/*
+	int count = 0;
+	
+	char** fg_array = (char**) malloc (2*sizeof(char*));
+	for(int i=0; i<2; i++)
+		fg_array[i] = (char*) malloc (sizeof(char*));
+
+	int j = 0;
+	int k = 0;
+	for(uint32_t i=0; command[i] != '\0'; i++)
+	{
+		if (command[i] == ' ')
+		{
+			fg_array[j][k] = '\0';
+			j++;
+			k = 0;	
+			count++;
+		}
+
+		else
+		{
+			fg_array[j][k++] = command[i];
+		}
+
+		if (count > 1 && strcmp(fg_array[0], "fg") == 0)
+		{
+			printf("Error: Bad command\n");
+			break;	
+		}
+	}
+
+	if (count == 1)
+	{
+		if (strcmp(fg_array[0], "fg") == 0)
+		{
+			int pid = atoi(fg_array[1]);
+			shellfgCommand(pid);
+			return 1;
+		}
+	}
+
+	for(int i=0; i<2; i++)
+		free(fg_array[i]);
+	free(fg_array);
+	*/
+	return 0;
+}
+
+void shellfgCommand(int pid)
+{
+	Job* temp = findPID(jobSet, pid);
+	if (temp && temp->node.jobtype == BG_JOB)	
+	{
+		// Bring the process to foreground
+        // First, give the pid a CONT signal to resume from suspended state
+		if (kill(-pid, SIGCONT) < 0)
         {
-            printf("No background jobs running now!\n");
-            return 1;
+            printf("myShell: fg %d: no such job\n", pid);
+            return;
         }
+	    
+        // Make the pid get the terminal control
+		if (tcsetpgrp(0, pid) < 0)
+			perror ("tcsetpgrp()");
 
-        //Move the background process to the foreground pgrp
-        pid_t bgpgrp = background_jobs[bc-1];
-        //printf("background_jobs[bc-1] =  %d\n",background_jobs[bc-1]);
+		int status = 0;
         
-        kill(background_jobs[bc-1], SIGCONT);
-        if(tcsetpgrp(0, background_jobs[bc-1]) < 0)
-            perror("tcsetpgrp()");
-        signal(SIGTTOU, SIG_IGN);
+        // Now the parent waits for the child to do it's job
+        waitpid(pid, &status, WUNTRACED);
+        
+        // Ignore SIGTTIN, SIGTTOU Signals till parents get back control
+		//signal(SIGTTIN, SIG_IGN);
+		signal(SIGTTOU, SIG_IGN);
+		
+		//tcsetpgrp(0, parentPID);
         tcsetpgrp(0, getpid());
-        signal(SIGTTOU, SIG_DFL);
-        return 1;
 
-    }
+		//signal(SIGTTIN, SIG_DFL);
+		signal(SIGTTOU, SIG_DFL);
+	}
 
-    return 0;
+	else
+	{
+        printf("myShell: fg %d: no such job\n", pid);
+	}
 }
 
-static inline void print_prompt()
-{    
-    printf("myShell~: $ ");
-}
-
-static void pipeline(char* command1, char* command2, char** arg1, char** arg2)
+void freeArgVector(int argLength, char** argVector)
 {
-    //Pass command from fromPID to toPID using pipes
-    static int pipefd1[2];
-    static int pipefd2[2];
-    pipe(pipefd1);
-
-    int childPID = fork();
-    if(childPID == 0)
-    {
-        //Inside Child
-        
-        //dup2(pipefd1[0], STDIN_FILENO);
-        dup2(pipefd1[1], STDOUT_FILENO);
-        execv(command1, arg1);
-    }
-
-    else
-    {
-        //Inside Parent
-        int secondPID = fork();
-        if(secondPID == 0)
-        {
-            dup2(pipefd2[0], STDOUT_FILENO);
-            execv(command2, arg2);
-        }
-
-        wait(NULL);
-        wait(NULL);
-    }
+    for(int i=0; i<argLength; i++)
+        free(argVector[i]);
+    free(argVector);
 }
 
 int main(int argc, char* argv[])
 {
-    //Set the PATH first
-    initialize_path(".myshellrc");
-
-    char c;
-    char* buf = NULL;
-    size_t n = 0;
-    char* exit_str = "exit"; 
+	// Set the PATH first
+	
+	uint32_t pathLength = setPATH(".myshellrc");
+	char* buffer = NULL;
+	size_t n = 0;
     
-    print_prompt();
+    int argLength = -1;
+    char** argVector = NULL;
 
-    //Add the list of Signals to be handled to the signal set
-    sigset_t set;
-    sigemptyset(&set);
-    sigaddset(&set, SIGINT);
-    sigaddset(&set, SIGKILL);
+	jobSet = (Job*) malloc (sizeof(Job));
+	Node jnode;
+	jnode.pid = getpid();
+	jnode.jobtype = FG_JOB;
+	jobSet->node = jnode;
+	jobSet->next = NULL;
 
-    struct sigaction sa;
-    sa.sa_handler = shell_handler;
-    sa.sa_flags = SA_SIGINFO;
+	int signalArray[] = {SIGINT, SIGKILL, -1};
+	sigset_t set = createSignalSet(signalArray);
+	struct sigaction sa;
+	sa.sa_handler = shellHandler;
+	sa.sa_flags = SA_SIGINFO;
 
-    //The parent must not receive signals
-    sigprocmask(SIG_BLOCK, &set, NULL);
+	// Parent must be blocked from these signals
+	sigprocmask(SIG_BLOCK, &set, NULL);
 
-    int pipefd[2];
-    pipe(pipefd);
-    
-    background_jobs = (int*) malloc (sizeof(int));
+	printPrompt();
 
-    while((c = getline(&buf, &n, stdin)))
-    {
-        for(int i=0; buf[i]!='\0'; i++)
-            if(buf[i] == '\n')
-                buf[i] = '\0';
+	// Now start the event loop
+	while (getline(&buffer, &n, stdin))
+	{
+		for (uint32_t i=0; buffer[i] != '\0'; i++)
+			if (buffer[i] == '\n')
+				buffer[i] = '\0';
 
-        if(compare_strs(buf, exit_str) == 1)
+		if (strcmp(buffer, "exit") == 0)
+		{
+			free(buffer);
+			freePATH();
+			exit(0);
+		}
+
+		if (strcmp(buffer, "printlist") == 0)
         {
-            free(buf);
-            exit(0);
-        }
-        
-        if(custom_command(buf) == 1)
-        {
-            print_prompt();
-        }
-        
-        else
-        {
-            if(bc>0 && waitpid(background_jobs[bc-1], NULL, WNOHANG))
+			printList(jobSet);
+			printPrompt();
+			continue;
+		}
+
+		if (bulletin(buffer) == 1)
+		{
+			printPrompt();
+			continue;
+		}
+
+		else
+		{
+			Job* curr = jobSet;
+			while (curr)
+			{
+				if (curr->node.jobtype == BG_JOB && waitpid(curr->node.pid, NULL, WNOHANG))
+				{
+					// Background Job has returned
+					jobSet = removeJob(jobSet, curr->node.pid);
+                    curr = curr->next;
+				}
+
+				else
+					curr = curr->next;
+			}	
+
+			argLength = getArgumentLength(buffer);
+			argVector = (char**) malloc (argLength * sizeof(char*));
+			for (uint32_t i=0; i < argLength; i++)
+				argVector[i] = (char*) malloc (100 * sizeof(char));
+
+			int count = 0;
+			int j = 0;
+			for (uint32_t i=0; buffer[i] != '\0'; i++)
+			{
+				if (buffer[i] == ' ')
+				{
+					argVector[count][j] = '\0';
+					j = 0;
+					count ++;
+				}
+
+				else
+					argVector[count][j++] = buffer[i];
+			}
+
+			argVector[count][j] = '\0';
+			argVector[count + 1] = NULL;
+
+			if (strcmp(argVector[count], "&") == 0)
+			{
+				isBackground = true;
+				argVector[count] = NULL;
+			}
+
+            if (strcmp(argVector[0], "fg") == 0)
             {
-                //printf("Bg returned\n");
-                bc --;
-            }
-
-            int ARG_LENGTH = get_args(buf) + 1;
-            char** arg = (char**) malloc (ARG_LENGTH*sizeof(char*));
-            for(int i=0; i<ARG_LENGTH; i++)
-                arg[i] = (char*) malloc (70*sizeof(char));
-            
-            int count = 0;
-            int j=0;
-            for(int i=0; buf[i]!='\0'; i++)
-            {
-                if(buf[i] == ' ')
+                if (jobSet)
                 {
-                    arg[count][j] = '\0';
-                    j = 0;
-                    count ++;
+                    shellfgCommand(atoi(argVector[1]));
+                    freeArgVector(argLength, argVector);
+                    printPrompt();
+                    isBackground = false;
+                    continue;
                 }
-
                 else
-                    arg[count][j++] = buf[i];
-            }
-            
-            arg[count][j] = '\0';
-            arg[count+1] = NULL;
-            
-            if(strcmp(arg[count], "&") == 0)
-            {
-                background_proc = 1;
-                //Now remove & from the arg list
-                arg[count] = NULL;
+                {
+                    printf("No background jobs!\n");
+                    freeArgVector(argLength, argVector);
+                    printPrompt();
+                    isBackground = false;
+                    continue;
+                }
             }
 
+			int pid = fork();
 
-            int pid = fork();
+			if (pid == 0)
+			{
+				// Child
+				if (isBackground == true)
+				{
+					printf("[bg]\t%d\n",getpid());
+					setpgid(0, 0);
+				}
 
-            if(pid == 0)
-            {
-                //Inside Child Process
-                cpipe[2];
-                pipe(cpipe);
+				else 
+				{
+					// Add to foreground process group
+					pid_t cgrp = getpgrp();
+					tcsetpgrp(STDIN_FILENO, cgrp);
+				}
 
-                if(background_proc == 1)
-                {
-                    //Add the background_proc to a process group
-                    printf("[bg]\t%d\n", getpid());
-                    setpgid(0, 0);
-                    
-                    //signal(SIGTTOU, SIG_IGN);
-                    //tcsetpgrp(0, getpgrp());
-                    
-                    dup2(cpipe[0], STDIN_FILENO);
-                    
-                    //close(cpipe[0]);
-                    //kill(getpid(), SIGTTIN);
-                }
-                
-                else
-                {
-                    //Add to foreground process group
-                    pid_t cpgrp = getpgrp();
-                    signal(SIGTTOU, SIG_IGN);
-                    if(tcsetpgrp(STDIN_FILENO, cpgrp) < 0)
-                    {   
-                        perror("tcsetpgrp()");
-                    }
-                }
-
-                //The child must receive the blocked signals
+				// The child must receive the previously blocked signals
                 sigprocmask(SIG_UNBLOCK, &set, NULL);
                 sigaction(SIGINT, &sa, NULL);
-                CURR_CHILD_PID = getpid();
+                childPID = getpid();
 
-                //Now, arg is a NULL terminated Array of Strings
                 int curr = 0;
 
-                while(curr < PATH_LENGTH)
+                while (curr < pathLength)
                 {
-                    if(execv(str_concat(PATH[curr], arg[0]), arg) < 0)
-                    {
-                        //Try all possible outcomes in PATH until it executes
-                        curr ++;
-                        if(curr == PATH_LENGTH)
-                        {
-                            perror("Error");
-                            exit(0);
-                        }
-                    }
+                	if (execv(str_concat(PATH[curr], argVector[0]), argVector) < 0)
+                	{
+                		curr ++;
+                		if (curr == pathLength)
+                		{
+                			perror("Error");
+                            freeArgVector(argLength, argVector);
+                            free(buffer);
+                			exit(0);
+                		}
+                	}
                 }
-                for(int i=0; i<ARG_LENGTH; i++)
-                {
-                    free(arg[i]);
-                }
-                free(arg);
-                perror("Error:");
-                exit(0);
-            }
-            else
-            {
-                PARENT_PID = getpid();
-                if(background_proc == 1)
+
+			}
+
+			else
+			{
+				parentPID = getpid();
+                
+                if (isBackground)
                 {
                     pid_t cpgrp = pid;
-                    background_jobs[bc++] = cpgrp;
-                    //signal(SIGTTIN, SIG_DFL);
-                    signal(SIGTTOU, SIG_IGN);
-                    //Make the parent control the Terminal
-                    kill(pid, SIGCONT);
+                    Node node;
+                    node.pid = pid;
+                    node.jobtype = BG_JOB;
+                    jobSet = insert(jobSet, node);
                     setpgrp();
                 }
                 else
                     waitpid(pid, NULL, 0);
-                background_proc = 0;
+				
+                isBackground = false;
 
-                for(int i=0; i<ARG_LENGTH; i++)
-                    free(arg[i]);
-                free(arg);
+				for(uint32_t i=0; i<argLength; i++)
+					free(argVector[i]);
+				free(argVector);
 
-                print_prompt();
-                CURR_CHILD_PID = -1;
-            }
-        }
-    }
+				printPrompt();
+			}
 
-    free(buf);
-    return 0;
+		}
+
+	}	
+
+	free(buffer);
+	return 0;
 }
