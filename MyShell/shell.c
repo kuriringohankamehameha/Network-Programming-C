@@ -224,51 +224,12 @@ uint32_t getArgumentLength(char* command)
 
 int bulletin(char* command)
 {
-	/*
-	int count = 0;
-	
-	char** fg_array = (char**) malloc (2*sizeof(char*));
-	for(int i=0; i<2; i++)
-		fg_array[i] = (char*) malloc (sizeof(char*));
-
-	int j = 0;
-	int k = 0;
-	for(uint32_t i=0; command[i] != '\0'; i++)
-	{
-		if (command[i] == ' ')
-		{
-			fg_array[j][k] = '\0';
-			j++;
-			k = 0;	
-			count++;
-		}
-
-		else
-		{
-			fg_array[j][k++] = command[i];
-		}
-
-		if (count > 1 && strcmp(fg_array[0], "fg") == 0)
-		{
-			printf("Error: Bad command\n");
-			break;	
-		}
-	}
-
-	if (count == 1)
-	{
-		if (strcmp(fg_array[0], "fg") == 0)
-		{
-			int pid = atoi(fg_array[1]);
-			shellfgCommand(pid);
-			return 1;
-		}
-	}
-
-	for(int i=0; i<2; i++)
-		free(fg_array[i]);
-	free(fg_array);
-	*/
+    // TODO (Vijay): Add bulletin commmands
+    // 1. kill
+    // 2. bg
+    // 3. joblist
+    // 4. cd
+    
 	return 0;
 }
 
