@@ -4,18 +4,18 @@
 #define uint32_t u_int32_t 
 
 enum bool {false = 0, true = ~0};
-enum _JobType {FG_JOB, BG_JOB, PEND_JOB, NONE};
+enum _Status { STATUS_SUSPENDED, STATUS_BACKGROUND, STATUS_FOREGROUND };
 
 typedef struct _Job_t Job;
 typedef struct _Node_t Node;
-typedef enum _JobType JobType;
+typedef enum _Status Status;
 typedef enum bool bool; 
 
 struct _Node_t{
 
 	int pid;
-	JobType jobtype;
     char* name;
+    Status status;
 
 };
 
@@ -98,6 +98,20 @@ Job* findPID(Job* head, int pid)
 	return NULL;
 }
 
+int findFG_STATUS(Job* head)
+{
+    // Returns the PID of the process in the FG that is not the parent
+    Job* temp = head;
+    while (temp)
+    {
+        if (temp != head && temp->node.status == STATUS_FOREGROUND)
+            return temp->node.pid;
+        temp = temp->next;
+    }
+
+    return -1;
+}
+
 void printList(Job* head)
 {
 	Job* temp = head;
@@ -109,13 +123,27 @@ void printList(Job* head)
 	printf("\n");
 }
 
+Job* changeStatus(Job* head, int pid, Status status)
+{
+    Job* temp = head;
+    while (temp)
+    {
+        if (temp->node.pid = pid)
+        {
+            temp->node.status = status;
+            return head;
+        }
+        temp = temp->next;
+    }
+    return head;
+}
+
 // Signal Handler Prototype
 static void shellHandler(int, siginfo_t*, void*);
 void shellfgCommand(int pid);
 
 // Global Variables for Process Flow
 char** PATH; // PATH Variable
-JobType processType = NONE;
 pid_t childPID, parentPID;
 bool isBackground = false;
 
@@ -143,11 +171,29 @@ char* str_concat(char* s1, char* s2)
 static void shellHandler(int signo, siginfo_t* info, void* context)
 {
 	// Passes it into the child first
-	if (signo == SIGINT || signo == SIGKILL)
+	if (signo == SIGINT || signo == SIGKILL || signo == SIGQUIT)
 	{
 		kill(childPID, signo);
 		kill(parentPID, SIGCHLD);
 	}
+
+    else if (signo == SIGTSTP)
+    {
+        // Suspend Signal
+        int fg_pid = findFG_STATUS(jobSet);
+        if (fg_pid != -1)
+        {
+            jobSet = changeStatus(jobSet, fg_pid, STATUS_SUSPENDED);
+            kill(fg_pid, signo);
+        }
+    }
+
+    else if (signo == SIGCHLD)
+    {
+        pid_t child = info->si_pid; 
+        jobSet = removeJob(jobSet, child);
+        signal(signo, SIG_DFL);
+    }
 
 	else
 	{
@@ -231,10 +277,20 @@ int bulletin(char* command)
 	return 0;
 }
 
+void shellkillCommand(int pid, int signo)
+{
+    Job* temp = findPID(jobSet, pid);
+    if (temp){
+
+        // Send a Signal to the child process based on the number 
+        kill(pid, signo); 
+    }
+}
+
 void shellfgCommand(int pid)
 {
 	Job* temp = findPID(jobSet, pid);
-	if (temp && temp->node.jobtype == BG_JOB)	
+	if (temp && temp->node.status == STATUS_BACKGROUND)	
 	{
 		// Bring the process to foreground
         // First, give the pid a CONT signal to resume from suspended state
@@ -245,7 +301,7 @@ void shellfgCommand(int pid)
         }
 
         // Make the pid get the terminal control
-        printf("[fg]  + %d continued  %s\n", getpid(), temp->node.name);
+        printf("[fg]  + %d continued  %s\n", temp->node.pid, temp->node.name);
         if (tcsetpgrp(0, pid) < 0)
 			perror ("tcsetpgrp()");
 
@@ -255,18 +311,48 @@ void shellfgCommand(int pid)
         waitpid(pid, &status, WUNTRACED);
         
         // Ignore SIGTTIN, SIGTTOU Signals till parents get back control
-		//signal(SIGTTIN, SIG_IGN);
 		signal(SIGTTOU, SIG_IGN);
-		
-		//tcsetpgrp(0, parentPID);
         tcsetpgrp(0, getpid());
-
-		//signal(SIGTTIN, SIG_DFL);
 		signal(SIGTTOU, SIG_DFL);
 	}
 
 	else
         printf("myShell: fg %d: no such job\n", pid);
+}
+
+void shellbgCommand(int pid)
+{
+    // Resumes a job in the background
+
+    Job* temp = findPID(jobSet, pid);
+    if (temp && temp->node.pid != parentPID)   
+    {
+        if (temp->node.status != STATUS_SUSPENDED)
+        {
+            printf("myShell: bg %d: job not currently suspended. Cannot resume\n", pid);
+            return;
+        }
+
+        jobSet = changeStatus(jobSet, pid, STATUS_BACKGROUND);
+
+        if (kill(-pid, SIGCONT) < 0)
+        {
+            printf("myShell: bg %d: no such job\n", pid);
+            return;
+        }
+
+        printf("[bg]  + %d continued  %s\n", temp->node.pid, temp->node.name);
+        if (tcsetpgrp(pid, pid) < 0)
+            perror ("tcsetpgrp()");
+
+        signal(SIGTTOU, SIG_IGN);
+        tcsetpgrp(0, getpid());
+        signal(SIGTTOU, SIG_DFL);
+    }
+
+    else
+        printf("myShell: bg %d: no such job\n", pid);
+
 }
 
 void freeArgVector(int argLength, char** argVector)
@@ -303,13 +389,13 @@ int main(int argc, char* argv[])
 	jobSet = (Job*) malloc (sizeof(Job));
 	Node jnode;
 	jnode.pid = getpid();
-	jnode.jobtype = FG_JOB;
     jnode.name = (char*) malloc (sizeof(char));
     strcpy(jnode.name, argv[0]);
-	jobSet->node = jnode;
+	jnode.status = STATUS_FOREGROUND;
+    jobSet->node = jnode;
 	jobSet->next = NULL;
 
-	int signalArray[] = {SIGINT, SIGKILL, -1};
+	int signalArray[] = {SIGINT, SIGKILL, SIGTSTP, -1};
 	sigset_t set = createSignalSet(signalArray);
 	struct sigaction sa;
 	sa.sa_handler = shellHandler;
@@ -318,6 +404,7 @@ int main(int argc, char* argv[])
 	// Parent must be blocked from these signals
 	sigprocmask(SIG_BLOCK, &set, NULL);
 
+    sigaction(SIGTSTP, &sa, NULL);
 	printPrompt();
 
 	// Now start the event loop
@@ -352,7 +439,7 @@ int main(int argc, char* argv[])
 			Job* curr = jobSet;
 			while (curr)
 			{
-				if (curr->node.jobtype == BG_JOB && waitpid(curr->node.pid, NULL, WNOHANG))
+				if (curr->node.status == STATUS_BACKGROUND && waitpid(curr->node.pid, NULL, WNOHANG))
 					// Background Job has returned
 					jobSet = removeJob(jobSet, curr->node.pid);
 				curr = curr->next;
@@ -412,8 +499,7 @@ int main(int argc, char* argv[])
                         }
                         free(name);
                     }
-                    pid = (pid == -1) ? atoi(argVector[1]) : pid;
-                    shellfgCommand(pid);
+                    shellfgCommand( pid == -1 ? atoi (argVector[1]) : pid );
                     freeArgVector(argLength, argVector);
                     printPrompt();
                     isBackground = false;
@@ -429,7 +515,53 @@ int main(int argc, char* argv[])
                 }
             }
 
+            if (strcmp(argVector[0], "bg") == 0)
+            {
+                int pid = -1;
+
+                if (jobSet)
+                {
+                    if (argVector[1][0] == '%' && argVector[1][1] == '.' && argVector[1][2] != '\0')
+                    {
+                        // Search by name
+                        char* name = (char*) malloc (sizeof(char));
+                        
+                        int i;
+                        for (i=2; argVector[1][i] != '\0'; i++)
+                            name[i-2] = argVector[1][i];
+                        name[i-2] = '\0';
+
+                        pid = getPIDfromname(jobSet, name);
+                        if (!pid){
+                            printf("myShell: bg %s: no such job\n", name);
+                            printPrompt();
+                            isBackground = false;
+                            continue;
+                        }
+                        free(name);
+                    }
+                    shellfgCommand( pid == -1 ? atoi (argVector[1]) : pid );
+                    freeArgVector(argLength, argVector);
+                    printPrompt();
+                    isBackground = false;
+                    continue;
+                }
+                else
+                {
+                    printf("No suspended jobs!\n");
+                    freeArgVector(argLength, argVector);
+                    printPrompt();
+                    isBackground = false;
+                    continue;
+                }
+            }
+
 			int pid = fork();
+
+            if (pid > 0)
+            {
+                sigaction(SIGCHLD, &sa, NULL);
+            }
 
 			if (pid == 0)
 			{
@@ -480,7 +612,7 @@ int main(int argc, char* argv[])
                     //pid_t cpgrp = pid;
                     Node node;
                     node.pid = pid;
-                    node.jobtype = BG_JOB;
+                    node.status = STATUS_BACKGROUND;
                     char* name = (char*) malloc (sizeof(char));
                     strcpy(name, argVector[0]);
                     node.name = name;
@@ -498,11 +630,8 @@ int main(int argc, char* argv[])
 
 				printPrompt();
 			}
-
 		}
-
 	}	
-
 	free(buffer);
 	return 0;
 }
