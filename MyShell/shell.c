@@ -3,7 +3,7 @@
 #define MAX_NUM_PATHS 100
 #define uint32_t u_int32_t 
 
-enum bool {false, true};
+enum bool {false = 0, true = ~0};
 enum _JobType {FG_JOB, BG_JOB, PEND_JOB, NONE};
 
 typedef struct _Job_t Job;
@@ -15,6 +15,7 @@ struct _Node_t{
 
 	int pid;
 	JobType jobtype;
+    char* name;
 
 };
 
@@ -63,15 +64,15 @@ Job* insert(Job* head, Node node)
 Job* removeJob(Job* head, int pid)
 {
 	Job* temp = head;
-    if(pid < 0 || temp->node.pid == pid){
+    if(pid < 0 || temp->node.pid == pid) {
 	    head = temp->next;
 	    temp->next = NULL;
 	    free(temp);
 	    return head;
     } else {
         // Remove PID
-        while(temp->next){
-            if (temp->next->node.pid == pid){
+        while(temp->next) {
+            if (temp->next->node.pid == pid) {
                 Job* del = temp->next;
                 temp->next = del->next;
                 del->next = NULL;
@@ -178,17 +179,14 @@ uint32_t setPATH(const char* filename)
 
 	while (fgets(buffer, sizeof(buffer), fp))
 	{
-		for (uint32_t i=0; ; i++)
-		{
-			if (buffer[i] == '\n')
-			{
+		for (uint32_t i=0; ; i++) {
+			if (buffer[i] == '\n') {
 				PATH[pathLength][j] = '\0';
 				break;
 			}
 			else
 				PATH[pathLength][j++] = buffer[i];
 		}
-
 		pathLength++;
 		j = 0;
 	}
@@ -245,9 +243,10 @@ void shellfgCommand(int pid)
             printf("myShell: fg %d: no such job\n", pid);
             return;
         }
-	    
+
         // Make the pid get the terminal control
-		if (tcsetpgrp(0, pid) < 0)
+        printf("[fg]  + %d continued  %s\n", getpid(), temp->node.name);
+        if (tcsetpgrp(0, pid) < 0)
 			perror ("tcsetpgrp()");
 
 		int status = 0;
@@ -267,9 +266,7 @@ void shellfgCommand(int pid)
 	}
 
 	else
-	{
         printf("myShell: fg %d: no such job\n", pid);
-	}
 }
 
 void freeArgVector(int argLength, char** argVector)
@@ -277,6 +274,19 @@ void freeArgVector(int argLength, char** argVector)
     for(int i=0; i<argLength; i++)
         free(argVector[i]);
     free(argVector);
+}
+
+int getPIDfromname(Job* jobSet, char* name)
+{
+    Job* temp = jobSet;
+    while (temp)
+    {
+        if (strcmp(temp->node.name, name) == 0)
+            return temp->node.pid;
+        temp = temp->next;
+    }
+
+    return 0;
 }
 
 int main(int argc, char* argv[])
@@ -294,6 +304,8 @@ int main(int argc, char* argv[])
 	Node jnode;
 	jnode.pid = getpid();
 	jnode.jobtype = FG_JOB;
+    jnode.name = (char*) malloc (sizeof(char));
+    strcpy(jnode.name, argv[0]);
 	jobSet->node = jnode;
 	jobSet->next = NULL;
 
@@ -341,14 +353,9 @@ int main(int argc, char* argv[])
 			while (curr)
 			{
 				if (curr->node.jobtype == BG_JOB && waitpid(curr->node.pid, NULL, WNOHANG))
-				{
 					// Background Job has returned
 					jobSet = removeJob(jobSet, curr->node.pid);
-                    curr = curr->next;
-				}
-
-				else
-					curr = curr->next;
+				curr = curr->next;
 			}	
 
 			argLength = getArgumentLength(buffer);
@@ -382,9 +389,31 @@ int main(int argc, char* argv[])
 
             if (strcmp(argVector[0], "fg") == 0)
             {
+                int pid = -1;
+
                 if (jobSet)
                 {
-                    shellfgCommand(atoi(argVector[1]));
+                    if (argVector[1][0] == '%' && argVector[1][1] == '.' && argVector[1][2] != '\0')
+                    {
+                        // Search by name
+                        char* name = (char*) malloc (sizeof(char));
+                        
+                        int i;
+                        for (i=2; argVector[1][i] != '\0'; i++)
+                            name[i-2] = argVector[1][i];
+                        name[i-2] = '\0';
+
+                        pid = getPIDfromname(jobSet, name);
+                        if (!pid){
+                            printf("myShell: fg %s: no such job\n", name);
+                            printPrompt();
+                            isBackground = false;
+                            continue;
+                        }
+                        free(name);
+                    }
+                    pid = (pid == -1) ? atoi(argVector[1]) : pid;
+                    shellfgCommand(pid);
                     freeArgVector(argLength, argVector);
                     printPrompt();
                     isBackground = false;
@@ -448,10 +477,13 @@ int main(int argc, char* argv[])
                 
                 if (isBackground)
                 {
-                    pid_t cpgrp = pid;
+                    //pid_t cpgrp = pid;
                     Node node;
                     node.pid = pid;
                     node.jobtype = BG_JOB;
+                    char* name = (char*) malloc (sizeof(char));
+                    strcpy(name, argVector[0]);
+                    node.name = name;
                     jobSet = insert(jobSet, node);
                     setpgrp();
                 }
