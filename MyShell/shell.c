@@ -102,9 +102,10 @@ int findFG_STATUS(Job* head)
 {
     // Returns the PID of the process in the FG that is not the parent
     Job* temp = head;
+    temp = temp->next;
     while (temp)
     {
-        if (temp != head && temp->node.status == STATUS_FOREGROUND)
+        if (temp->node.status == STATUS_FOREGROUND)
             return temp->node.pid;
         temp = temp->next;
     }
@@ -173,6 +174,7 @@ static void shellHandler(int signo, siginfo_t* info, void* context)
 	// Passes it into the child first
 	if (signo == SIGINT || signo == SIGKILL || signo == SIGQUIT)
 	{
+        printf("Ahoy\n");
 		kill(childPID, signo);
 		kill(parentPID, SIGCHLD);
 	}
@@ -180,6 +182,7 @@ static void shellHandler(int signo, siginfo_t* info, void* context)
     else if (signo == SIGTSTP)
     {
         // Suspend Signal
+        printf("Suspend Signal\n");
         int fg_pid = findFG_STATUS(jobSet);
         if (fg_pid != -1)
         {
@@ -290,7 +293,7 @@ void shellkillCommand(int pid, int signo)
 void shellfgCommand(int pid)
 {
 	Job* temp = findPID(jobSet, pid);
-	if (temp && temp->node.status == STATUS_BACKGROUND)	
+	if (temp && temp->node.status != STATUS_FOREGROUND)	
 	{
 		// Bring the process to foreground
         // First, give the pid a CONT signal to resume from suspended state
@@ -404,7 +407,6 @@ int main(int argc, char* argv[])
 	// Parent must be blocked from these signals
 	sigprocmask(SIG_BLOCK, &set, NULL);
 
-    sigaction(SIGTSTP, &sa, NULL);
 	printPrompt();
 
 	// Now start the event loop
@@ -582,6 +584,7 @@ int main(int argc, char* argv[])
 				// The child must receive the previously blocked signals
                 sigprocmask(SIG_UNBLOCK, &set, NULL);
                 sigaction(SIGINT, &sa, NULL);
+                sigaction(SIGTSTP, &sa, NULL);
                 childPID = getpid();
 
                 int curr = 0;
@@ -621,7 +624,7 @@ int main(int argc, char* argv[])
                 }
                 else
                     waitpid(pid, NULL, 0);
-				
+
                 isBackground = false;
 
 				for(uint32_t i=0; i<argLength; i++)
