@@ -11,9 +11,16 @@ int PARENT_PID;
 int background_proc = 0;
 int fg_command = 0;
 int bg_command = 0;
+int bg_to_fg = 0;
+
+static int* background_jobs;
+static int bc = 0;
+
+int cpipe[2];
 
 //Shell Signal Handler
 static void shell_handler(int, siginfo_t*, void*);
+static inline void print_prompt();
 
 static void shell_handler(int signo, siginfo_t* info, void* context)
 {
@@ -29,10 +36,11 @@ static void shell_handler(int signo, siginfo_t* info, void* context)
         {
             signal(signo, SIG_IGN);
             printf("\n");
-            printf("myShell~:$ ");
+            print_prompt();
         }
     }
 }
+
 
 void initialize_path(const char* filename)
 {
@@ -120,8 +128,67 @@ int custom_command(char* command)
        clear_terminal();    
        return 1;
     }
+    
+    else if(strcmp(command, "fg") == 0)
+    {
+        if(bc == 0)
+        {
+            printf("No background jobs running now!\n");
+            return 1;
+        }
+
+        //Move the background process to the foreground pgrp
+        pid_t bgpgrp = background_jobs[bc-1];
+        //printf("background_jobs[bc-1] =  %d\n",background_jobs[bc-1]);
+        
+        kill(background_jobs[bc-1], SIGCONT);
+        if(tcsetpgrp(0, background_jobs[bc-1]) < 0)
+            perror("tcsetpgrp()");
+        signal(SIGTTOU, SIG_IGN);
+        tcsetpgrp(0, getpid());
+        signal(SIGTTOU, SIG_DFL);
+        return 1;
+
+    }
 
     return 0;
+}
+
+static inline void print_prompt()
+{    
+    printf("myShell~: $ ");
+}
+
+static void pipeline(char* command1, char* command2, char** arg1, char** arg2)
+{
+    //Pass command from fromPID to toPID using pipes
+    static int pipefd1[2];
+    static int pipefd2[2];
+    pipe(pipefd1);
+
+    int childPID = fork();
+    if(childPID == 0)
+    {
+        //Inside Child
+        
+        //dup2(pipefd1[0], STDIN_FILENO);
+        dup2(pipefd1[1], STDOUT_FILENO);
+        execv(command1, arg1);
+    }
+
+    else
+    {
+        //Inside Parent
+        int secondPID = fork();
+        if(secondPID == 0)
+        {
+            dup2(pipefd2[0], STDOUT_FILENO);
+            execv(command2, arg2);
+        }
+
+        wait(NULL);
+        wait(NULL);
+    }
 }
 
 int main(int argc, char* argv[])
@@ -134,8 +201,9 @@ int main(int argc, char* argv[])
     size_t n = 0;
     char* exit_str = "exit"; 
     
-    printf("myShell~:$ ");
+    print_prompt();
 
+    //Add the list of Signals to be handled to the signal set
     sigset_t set;
     sigemptyset(&set);
     sigaddset(&set, SIGINT);
@@ -145,11 +213,13 @@ int main(int argc, char* argv[])
     sa.sa_handler = shell_handler;
     sa.sa_flags = SA_SIGINFO;
 
+    //The parent must not receive signals
     sigprocmask(SIG_BLOCK, &set, NULL);
-    //sigaction(SIGINT, &sa, NULL);
 
     int pipefd[2];
     pipe(pipefd);
+    
+    background_jobs = (int*) malloc (sizeof(int));
 
     while((c = getline(&buf, &n, stdin)))
     {
@@ -165,13 +235,16 @@ int main(int argc, char* argv[])
         
         if(custom_command(buf) == 1)
         {
-            printf("myShell~:$ ");
+            print_prompt();
         }
         
         else
         {
-            int pid = fork();
-            PARENT_PID = getpid();
+            if(bc>0 && waitpid(background_jobs[bc-1], NULL, WNOHANG))
+            {
+                //printf("Bg returned\n");
+                bc --;
+            }
 
             int ARG_LENGTH = get_args(buf) + 1;
             char** arg = (char**) malloc (ARG_LENGTH*sizeof(char*));
@@ -199,17 +272,46 @@ int main(int argc, char* argv[])
             if(strcmp(arg[count], "&") == 0)
             {
                 background_proc = 1;
+                //Now remove & from the arg list
+                arg[count] = NULL;
             }
+
+
+            int pid = fork();
 
             if(pid == 0)
             {
                 //Inside Child Process
+                cpipe[2];
+                pipe(cpipe);
+
                 if(background_proc == 1)
                 {
                     //Add the background_proc to a process group
+                    printf("[bg]\t%d\n", getpid());
                     setpgid(0, 0);
-                    signal(SIGTTOU, SIG_IGN);
+                    
+                    //signal(SIGTTOU, SIG_IGN);
+                    //tcsetpgrp(0, getpgrp());
+                    
+                    dup2(cpipe[0], STDIN_FILENO);
+                    
+                    //close(cpipe[0]);
+                    //kill(getpid(), SIGTTIN);
                 }
+                
+                else
+                {
+                    //Add to foreground process group
+                    pid_t cpgrp = getpgrp();
+                    signal(SIGTTOU, SIG_IGN);
+                    if(tcsetpgrp(STDIN_FILENO, cpgrp) < 0)
+                    {   
+                        perror("tcsetpgrp()");
+                    }
+                }
+
+                //The child must receive the blocked signals
                 sigprocmask(SIG_UNBLOCK, &set, NULL);
                 sigaction(SIGINT, &sa, NULL);
                 CURR_CHILD_PID = getpid();
@@ -240,21 +342,26 @@ int main(int argc, char* argv[])
             }
             else
             {
+                PARENT_PID = getpid();
                 if(background_proc == 1)
                 {
+                    pid_t cpgrp = pid;
+                    background_jobs[bc++] = cpgrp;
+                    //signal(SIGTTIN, SIG_DFL);
                     signal(SIGTTOU, SIG_IGN);
                     //Make the parent control the Terminal
+                    kill(pid, SIGCONT);
                     setpgrp();
                 }
                 else
-                    wait(NULL);
+                    waitpid(pid, NULL, 0);
                 background_proc = 0;
 
                 for(int i=0; i<ARG_LENGTH; i++)
                     free(arg[i]);
                 free(arg);
 
-                printf("myShell~:$ ");
+                print_prompt();
                 CURR_CHILD_PID = -1;
             }
         }
