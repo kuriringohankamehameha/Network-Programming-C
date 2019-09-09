@@ -24,6 +24,7 @@ struct _Node_t{
 	int pid;
     char* name;
     Status status;
+    int gid;
 
 };
 
@@ -184,67 +185,22 @@ char* str_concat(char* s1, char* s2)
 
 static void shellHandler(int signo)
 {
-    printf("Inside Shell Handler via PID = %d\n", getpid());
     if (signo == SIGINT)
     {
-        printf("Ahoy\n");
         signal(signo, SIG_DFL);
     }
 
     else if (signo == SIGTSTP)
     {
-        printf("Suspend Signal\n");
         char* name = (char*) malloc (sizeof(char));
         strcpy(name, argVector[0]);
-        Node node = {childPID, name, STATUS_SUSPENDED};
+        Node node = {childPID, name, STATUS_SUSPENDED, childPID};
         jobSet = insert(jobSet, node); 
         printList(jobSet);
         setpgid(childPID, childPID);
         kill(-childPID, SIGSTOP);
     }
 
-}
-
-static void shellHandler2(int signo, siginfo_t* info, void* context)
-{
-	// Passes it into the child first
-	if (signo == SIGINT || signo == SIGKILL || signo == SIGQUIT)
-	{
-		kill(childPID, signo);
-		kill(parentPID, SIGCHLD);
-	}
-
-    else if (signo == SIGTSTP || signo == 20)
-    {
-        // Suspend Signal
-        int fg_pid = findFG_STATUS(jobSet);
-        if (fg_pid != -1)
-        {
-            jobSet = changeStatus(jobSet, fg_pid, STATUS_SUSPENDED);
-            kill(fg_pid, SIGSTOP);
-        }
-    }
-
-    else if (signo == SIGCHLD)
-    {
-        if (!isSuspended)
-        {
-            pid_t child = info->si_pid; 
-            jobSet = removeJob(jobSet, child);
-            signal(signo, SIG_DFL);
-        }
-        else{
-            isSuspended = false;
-            kill(info->si_pid, SIGTSTP);
-        }
-    }
-
-	else
-	{
-		signal(signo, SIG_IGN);
-		printf("\n");
-		printPrompt();
-	}
 }
 
 uint32_t setPATH(const char* filename)
@@ -310,9 +266,9 @@ uint32_t getArgumentLength(char* command)
 	return count;
 }
 
-int bulletin(char* command)
+int builtin(char* command)
 {
-    // TODO (Vijay): Add bulletin commmands
+    // TODO (Vijay): Add builtin commmands
     // 1. kill
     // 2. bg
     // 3. joblist
@@ -438,6 +394,7 @@ int main(int argc, char* argv[])
     jnode.name = (char*) malloc (sizeof(char));
     strcpy(jnode.name, argv[0]);
 	jnode.status = STATUS_FOREGROUND;
+    jnode.gid = getpid();
     jobSet->node = jnode;
 	jobSet->next = NULL;
 
@@ -481,7 +438,7 @@ int main(int argc, char* argv[])
 			continue;
 		}
 
-		if (bulletin(buffer) == 1)
+		if (builtin(buffer) == 1)
 		{
 			printPrompt();
 			continue;
@@ -617,7 +574,7 @@ int main(int argc, char* argv[])
 
 				if (isBackground == true)
 				{
-					printf("[bg]\t%d\n",getpid());
+					printf("[bg]  %d\n",getpid());
 					setpgid(0, 0);
 				}
 
@@ -657,26 +614,29 @@ int main(int argc, char* argv[])
                     Node node;
                     node.pid = pid;
                     node.status = STATUS_BACKGROUND;
+                    node.gid = pid;
                     char* name = (char*) malloc (sizeof(char));
                     strcpy(name, argVector[0]);
                     node.name = name;
                     jobSet = insert(jobSet, node);
                     setpgrp();
+                    int status;
+                    if (waitpid (pid, &status, WUNTRACED) > 0)
+                        printf("[bg]  %d finished\n", pid);
                 }
 
                 else
                 {
-                    int spid;
                     int status;
-                    if(spid = waitpid(-1, &status, WSTOPPED | WCONTINUED) >= 0){
-                        char* string = (char*) malloc (sizeof(char));
-                        //printf("%d %s\n", pid, string = WIFSTOPPED(status) ? "stopped" : WIFCONTINUED(status) ? "continued" : "exited");
-                        if(strcmp(string, "stopped") == 0)
+                    if(waitpid(-1, &status, WSTOPPED | WCONTINUED) >= 0){
+                        char c_status;
+                        c_status = WIFSTOPPED(status) ? 's' : WIFCONTINUED(status) ? 'c' : 'e';
+                        if(c_status == 's')
                         {
                             setpgid(pid, pid);
                             char* name = (char*) malloc (sizeof(char));
                             strcpy(name, argVector[0]);
-                            Node node = {pid, name, STATUS_SUSPENDED};
+                            Node node = {pid, name, STATUS_SUSPENDED, getpgrp()};
                             jobSet = insert(jobSet, node);
                         }
                     }
