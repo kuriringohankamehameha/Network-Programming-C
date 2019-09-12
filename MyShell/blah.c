@@ -183,7 +183,7 @@ char* str_concat(char* s1, char* s2)
     return op;
 }
 
-static void shellHandler(int signo, siginfo_t* info, void* context)
+static void shellHandler(int signo)
 {
     if (signo == SIGINT)
     {
@@ -199,16 +199,6 @@ static void shellHandler(int signo, siginfo_t* info, void* context)
         printList(jobSet);
         setpgid(childPID, childPID);
         kill(-childPID, SIGSTOP);
-    }
-
-    else if (signo == SIGCHLD)
-    {
-        Job* temp = findPID(jobSet, info->si_pid);
-        if (temp && temp->node.status == STATUS_BACKGROUND)
-        {
-            printf("[bg]  %s - %d finished\n", temp->node.name, info->si_pid);
-        }
-        signal(SIGCHLD, SIG_DFL);
     }
 
 }
@@ -387,40 +377,6 @@ int getPIDfromname(Job* jobSet, char* name)
     return 0;
 }
 
-void executePipe(char ***cmd)
-{
-    int p[2];
-    int pid;
-    int fd_in = 0;
-
-    while (*cmd != NULL)
-    {
-        pipe(p);
-        if ((pid = fork()) == -1)
-        {
-            printf("Error\n");
-            exit(1);
-        }
-        else if (pid == 0)
-        {
-            dup2(fd_in, 0);
-            if(*(cmd + 1) != NULL)
-            {
-                dup2(p[1], 1);
-            }
-            close(p[0]);
-            execvp((*cmd)[0], *cmd);
-            exit(1);
-        }
-        else{
-            wait(NULL);
-            close(p[1]);
-            fd_in = p[0];
-            cmd++;
-        }
-    }
-}
-
 int main(int argc, char* argv[])
 {
 	// Set the PATH first
@@ -463,15 +419,14 @@ int main(int argc, char* argv[])
         while (curr)
         {
             if (curr->node.status == STATUS_BACKGROUND && waitpid(curr->node.pid, NULL, WNOHANG))
-            {   // Background Job has returned
-                //printf("[bg]  %d finished\n", curr->node.pid);
+                // Background Job has returned
                 jobSet = removeJob(jobSet, curr->node.pid);
-            }
             curr = curr->next;
         }	
 
 		if (strcmp(buffer, "exit") == 0)
 		{
+			free(buffer);
 			freePATH();
 			exit(0);
 		}
@@ -601,86 +556,13 @@ int main(int argc, char* argv[])
                     continue;
                 }
             }
-			
-            char*** commands = (char***) calloc (20, sizeof(char**));
-            for (int i=0; i<20; i++)
-            {
-                commands[i] = (char**) calloc (20, sizeof(char*));
-                for (int j=0; j<20; j++)
-                {
-                    commands[i][j] = (char*) calloc (50, sizeof(char));
-                }
-            }
-
-            int a = 0;
-            int lastPipe = 0;
-            int pipeCount = 0;
-
-            for (int i=0; argVector[i] != NULL; i++)
-            {
-                if (strcmp(argVector[i], "|") == 0)
-                {
-                    if (lastPipe == 0)
-                    {
-                        for (a=0; a<i; a++)
-                            strcpy(commands[pipeCount][a], argVector[a]); 
-
-                        // Make NULL terminated command
-                        commands[pipeCount][i] = NULL;
-
-                        // Update Pipe location
-                        lastPipe = i;
-                        pipeCount++;
-                    }
-
-                    else
-                    {
-                        for (a = lastPipe+1; a<i; a++)
-                        {
-                            strcpy(commands[pipeCount][a-lastPipe-1], argVector[a]);
-                        }
-
-                        // Make NULL terminated command
-                        commands[pipeCount][i-lastPipe-1] = NULL;
-
-                        // Update Pipe location
-                        lastPipe = i;
-                        pipeCount++;
-                   }
-
-               }
-            }
-            
-            if (pipeCount > 0)
-            {
-                for(a=lastPipe + 1; argVector[a]!=NULL; a++)
-                {
-                    if (strcmp(argVector[a], "|") != 0)
-                    {
-                        strcpy(commands[pipeCount][a-lastPipe-1], argVector[a]);
-                    }
-                }
-                commands[pipeCount][a-lastPipe-1] = NULL;
-            }
-
-            // Now, I must have a NULL terminated array of Commands
-            commands[pipeCount+1][a] = NULL;
-            commands[pipeCount+1] = NULL;
-
-
-            if (pipeCount > 0)
-            {
-                executePipe(commands);
-                printPrompt();
-                continue;
-            }
-            
-
-            int pid = fork();
+			int pid = fork();
             childPID = pid;
 
 			if (pid == 0)
 			{
+				// Child
+                
 				// The child must receive the previously blocked signals
                 sigprocmask(SIG_UNBLOCK, &set, NULL);
                 signal(SIGINT, SIG_DFL);
@@ -693,15 +575,14 @@ int main(int argc, char* argv[])
 				if (isBackground == true)
 				{
 					printf("[bg]  %d\n",getpid());
-                    setpgid(0, 0);
+					setpgid(0, 0);
 				}
 
 				else 
 				{
 					// Add to foreground process group
 					pid_t cgrp = getpgrp();
-					// Problem with below line
-                    //tcsetpgrp(STDIN_FILENO, cgrp);
+					tcsetpgrp(STDIN_FILENO, cgrp);
                     setpgid(getpgrp(), getppid());
 				}
 
@@ -716,6 +597,7 @@ int main(int argc, char* argv[])
                 		{
                 			perror("Error");
                             freeArgVector(argLength, argVector);
+                            free(buffer);
                 			exit(0);
                 		}
                 	}
@@ -738,9 +620,8 @@ int main(int argc, char* argv[])
                     node.name = name;
                     jobSet = insert(jobSet, node);
                     setpgrp();
-                    //tcsetpgrp(STDIN_FILENO, getpgrp());
                     int status;
-                    if (waitpid (pid, &status, WNOHANG) > 0)
+                    if (waitpid (pid, &status, WUNTRACED) > 0)
                         printf("[bg]  %d finished\n", pid);
                 }
 
@@ -762,14 +643,16 @@ int main(int argc, char* argv[])
                     //waitpid(pid, NULL, WUNTRACED);
                 }
                 isBackground = false;
+                signal(SIGTSTP, shellHandler);
 
-				//for(uint32_t i=0; i<argLength; i++)
-				//	free(argVector[i]);
-				//free(argVector);
+				for(uint32_t i=0; i<argLength; i++)
+					free(argVector[i]);
+				free(argVector);
 
 				printPrompt();
 			}
 		}
 	}	
+	free(buffer);
 	return 0;
 }
