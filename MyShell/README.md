@@ -4,3 +4,6 @@
 * Signals are not currently handled by the Signal Handler
 * Add some builtin commands
 * Refactor Code
+
+# Bugs
+* Running `fg` on a backgrounded process sometimes does not resolve by name

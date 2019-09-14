@@ -1,4 +1,5 @@
 #include "shell.h"
+#include<fcntl.h>
 
 #define MAX_NUM_PATHS 100
 #define uint32_t u_int32_t 
@@ -153,6 +154,16 @@ Job* changeStatus(Job* head, int pid, Status status)
     return head;
 }
 
+void freeJobs(Job* jobSet)
+{
+    Job* temp = jobSet;
+    while(temp)
+    {
+        free(temp->node.name);
+        temp = temp->next;
+    }
+}
+
 // Signal Handler Prototype
 void shellfgCommand(int pid);
 
@@ -163,9 +174,10 @@ bool isBackground = false;
 char** argVector;
 
 // Initialize the jobSet
-static Job* jobSet; 
+Job* jobSet; 
 
-static inline void printPrompt()
+//static inline 
+void printPrompt()
 {
     printf("%smyShell~: $ %s", COLOR_GREEN, COLOR_YELLOW);
 }
@@ -174,7 +186,7 @@ char* str_concat(char* s1, char* s2)
 {
     int l1 = strlen(s1);
     int l2 = strlen(s2);
-    char* op = (char*) malloc ((l1 + l2)*sizeof(char));
+    char* op = (char*) calloc (l1 + l2, sizeof(char));
     for(int i=0; i<l1 + l2; i++)
         if (i < l1)
             op[i] = s1[i];
@@ -208,7 +220,9 @@ static void shellHandler(int signo, siginfo_t* info, void* context)
         {
             printf("[bg]  %s - %d finished\n", temp->node.name, info->si_pid);
         }
-        signal(SIGCHLD, SIG_DFL);
+        fflush(stdout);
+        fflush(stdin);
+        //signal(SIGCHLD, SIG_DFL);
     }
 
 }
@@ -220,7 +234,7 @@ uint32_t setPATH(const char* filename)
 
 	PATH = (char**) malloc (MAX_NUM_PATHS*sizeof(char*));
 	for (uint32_t i=0; i<MAX_NUM_PATHS; i++)
-		PATH[i] = (char*) malloc (sizeof(char));
+		PATH[i] = (char*) calloc (50, sizeof(char));
 
 	char buffer[256];
 	FILE* fp = fopen(filename, "r");
@@ -369,7 +383,7 @@ void shellbgCommand(int pid)
 
 void freeArgVector(int argLength, char** argVector)
 {
-    for(int i=0; i<argLength; i++)
+    for(int i=0; i<=argLength; i++)
         free(argVector[i]);
     free(argVector);
 }
@@ -421,13 +435,123 @@ void executePipe(char ***cmd)
     }
 }
 
+void execRedirect(char** cmd1, char** cmd2, int redirection)
+{
+    // Check sizes of commmands
+    int fd = -1;
+    int count1 = 0;
+    int count2 = 0;
+    for (int i=0; cmd1[i]!=NULL; i++)
+        count1 ++;
+    for (int i=0; cmd2[i]!=NULL; i++)
+        count2 ++;
+
+    if (count2 > 1)
+    {
+        printf("Error : Can only redirect to a File\n");
+        return;
+    }
+
+    if (redirection == 0)
+    {
+        // Redirection to output file >
+        fd = open(cmd2[0], O_WRONLY | O_CREAT, 0644);
+    }
+
+    else if (redirection == 1)
+    {
+        // <
+        if (count2 > 1)
+        {
+            printf("Error : Can only redirect \'<\' from a File\n");
+            return;
+        }
+
+        if (access(cmd2[0], F_OK) == -1)
+        {
+            printf("myShell: No such file or directory : %s\n", cmd2[0]);
+            return;
+        }
+        
+        fd = open(cmd2[0], O_RDONLY, 0644);
+
+        int pid = fork();
+        int save_in = dup(STDIN_FILENO);
+        if (pid == 0)
+        {
+            dup2(fd, STDIN_FILENO);
+            close(fd);
+            execvp(cmd1[0], cmd1);
+            fprintf(stderr, "Failed to execute %s\n", cmd2[0]);
+        }
+        else{
+            int status;
+            waitpid(pid, &status, NULL);
+            dup2(save_in, STDIN_FILENO);
+            close(save_in);
+        }
+        return;
+    }
+    else if (redirection == 2)
+    {
+        fd = open(cmd2[0], O_WRONLY | O_APPEND | O_CREAT, 0644);
+    }
+
+    int pid = fork();
+    int save_out = dup(STDOUT_FILENO);
+    if (pid == 0)
+    {
+        dup2(fd, STDOUT_FILENO);
+        close(fd);
+        execvp(cmd1[0], cmd1);
+        fprintf(stderr, "Failed to execute %s\n", cmd1[0]);
+    }
+    else{
+        int status;
+        waitpid(pid, &status, NULL);
+        dup2(save_out, STDOUT_FILENO);
+        close(save_out);
+    }
+}
+
+char* lineget(void) {
+    char * line = malloc(100), * linep = line;
+    size_t lenmax = 100, len = lenmax;
+    int c;
+
+    if(line == NULL)
+        return NULL;
+
+    for(;;) {
+        c = fgetc(stdin);
+        if(c == EOF)
+            break;
+
+        if(--len == 0) {
+            len = lenmax;
+            char * linen = realloc(linep, lenmax *= 2);
+
+            if(linen == NULL) {
+                free(linep);
+                return NULL;
+            }
+            line = linen + (line - linep);
+            linep = linen;
+        }
+
+        if((*line++ = c) == '\n')
+            break;
+    }
+    *line = '\0';
+    return linep;
+}
+
 int main(int argc, char* argv[])
 {
 	// Set the PATH first
 	
 	uint32_t pathLength = setPATH(".myshellrc");
-	char* buffer = NULL;
-	size_t n = 0;
+	char* buffer = (char*) malloc (sizeof(char));
     
     int argLength = -1;
     argVector = NULL;
@@ -435,7 +559,7 @@ int main(int argc, char* argv[])
 	jobSet = (Job*) malloc (sizeof(Job));
 	Node jnode;
 	jnode.pid = getpid();
-    jnode.name = (char*) malloc (sizeof(char));
+    jnode.name = (char*) calloc (150, sizeof(char));
     strcpy(jnode.name, argv[0]);
 	jnode.status = STATUS_FOREGROUND;
     jnode.gid = getpid();
@@ -444,7 +568,7 @@ int main(int argc, char* argv[])
 
 	int signalArray[] = {SIGINT, SIGKILL, SIGTSTP, -1};
 	sigset_t set = createSignalSet(signalArray);
-	struct sigaction sa;
+	struct sigaction sa = {0};
 	sa.sa_handler = shellHandler;
 	sa.sa_flags = SA_SIGINFO;
 
@@ -453,9 +577,9 @@ int main(int argc, char* argv[])
 	printPrompt();
 
 	// Now start the event loop
-	while (getline(&buffer, &n, stdin))
-	{
-		for (uint32_t i=0; buffer[i] != '\0'; i++)
+	while((buffer = lineget()))
+    {
+        for (uint32_t i=0; buffer[i] != '\0'; i++)
 			if (buffer[i] == '\n')
 				buffer[i] = '\0';
 
@@ -473,6 +597,8 @@ int main(int argc, char* argv[])
 		if (strcmp(buffer, "exit") == 0)
 		{
 			freePATH();
+            freeJobs(jobSet);
+            free(jobSet);
 			exit(0);
 		}
 
@@ -492,32 +618,38 @@ int main(int argc, char* argv[])
 		else
 		{
 			argLength = getArgumentLength(buffer);
-			argVector = (char**) malloc (argLength * sizeof(char*));
-			for (uint32_t i=0; i < argLength; i++)
-				argVector[i] = (char*) malloc (100 * sizeof(char));
+			argVector = (char**) malloc ((argLength+1)* sizeof(char*));
+			for (uint32_t i=0; i <= argLength; i++)
+				argVector[i] = (char*) calloc (100, sizeof(char));
 
 			int count = 0;
 			int j = 0;
 			for (uint32_t i=0; buffer[i] != '\0'; i++)
 			{
-				if (buffer[i] == ' ')
+				if (buffer[i] == ' ' && buffer[i+1] == ' ')
 				{
-					argVector[count][j] = '\0';
-					j = 0;
-					count ++;
-				}
-
-				else
-					argVector[count][j++] = buffer[i];
+                    continue;
+                }
+                else if (buffer[i] == ' ')
+                {
+                    argVector[count][j++] = '\0';
+                    count++;
+                    j = 0;
+                }
+                else
+                {
+                    argVector[count][j] = buffer[i];
+                    j++;
+                }
 			}
 
 			argVector[count][j] = '\0';
-			argVector[count + 1] = NULL;
+			argVector[count + 1] = 0;
 
 			if (strcmp(argVector[count], "&") == 0)
 			{
 				isBackground = true;
-				argVector[count] = NULL;
+				argVector[count] = 0;
 			}
 
             if (strcmp(argVector[0], "fg") == 0)
@@ -601,17 +733,8 @@ int main(int argc, char* argv[])
                     continue;
                 }
             }
-			
-            char*** commands = (char***) calloc (20, sizeof(char**));
-            for (int i=0; i<20; i++)
-            {
-                commands[i] = (char**) calloc (20, sizeof(char*));
-                for (int j=0; j<20; j++)
-                {
-                    commands[i][j] = (char*) calloc (50, sizeof(char));
-                }
-            }
-
+		
+            char*** commands;
             int a = 0;
             int lastPipe = 0;
             int pipeCount = 0;
@@ -622,11 +745,23 @@ int main(int argc, char* argv[])
                 {
                     if (lastPipe == 0)
                     {
-                        for (a=0; a<i; a++)
-                            strcpy(commands[pipeCount][a], argVector[a]); 
+                        commands = (char***) calloc (20, sizeof(char**));
+                        for (int i=0; i<20; i++)
+                        {
+                            commands[i] = (char**) calloc (20, sizeof(char*));
+                            for (int j=0; j<20; j++)
+                            {
+                                commands[i][j] = (char*) malloc (sizeof(char));
+                            }
+                        }
 
+                        for (a=0; a<i; a++)
+                        {
+                            commands[pipeCount][a] = (char*) realloc (commands[pipeCount][a], strlen(argVector[a])+1);    
+                            strcpy(commands[pipeCount][a], argVector[a]); 
+                        }
                         // Make NULL terminated command
-                        commands[pipeCount][i] = NULL;
+                        commands[pipeCount][i] = 0;
 
                         // Update Pipe location
                         lastPipe = i;
@@ -637,11 +772,12 @@ int main(int argc, char* argv[])
                     {
                         for (a = lastPipe+1; a<i; a++)
                         {
+                            commands[pipeCount][a-lastPipe-1] = (char*) realloc (commands[pipeCount][a-lastPipe-1], strlen(argVector[a])+1);    
                             strcpy(commands[pipeCount][a-lastPipe-1], argVector[a]);
                         }
 
                         // Make NULL terminated command
-                        commands[pipeCount][i-lastPipe-1] = NULL;
+                        commands[pipeCount][i-lastPipe-1] = 0;
 
                         // Update Pipe location
                         lastPipe = i;
@@ -657,27 +793,112 @@ int main(int argc, char* argv[])
                 {
                     if (strcmp(argVector[a], "|") != 0)
                     {
+                        commands[pipeCount][a-lastPipe-1] = (char*) realloc (commands[pipeCount][a-lastPipe-1], strlen(argVector[a])+1);    
                         strcpy(commands[pipeCount][a-lastPipe-1], argVector[a]);
                     }
                 }
-                commands[pipeCount][a-lastPipe-1] = NULL;
-            }
+                commands[pipeCount][a-lastPipe-1] = 0;
 
-            // Now, I must have a NULL terminated array of Commands
-            commands[pipeCount+1][a] = NULL;
-            commands[pipeCount+1] = NULL;
+                // Now, I must have a NULL terminated array of Commands
+                commands[pipeCount+1][a] = 0;
+                commands[pipeCount+1] = 0;
+            }
 
 
             if (pipeCount > 0)
             {
                 executePipe(commands);
                 printPrompt();
+                for(int i=0; i<20; i++)
+                {
+                    free(commands[i]);
+                }
+                free(commands);
+                freeArgVector(argLength, argVector);
                 continue;
             }
             
 
+            int redirect = 0;
+
+            char** redirectcmd1 = (char**) calloc (5, sizeof(char*));
+            char** redirectcmd2 = (char**) calloc (5, sizeof(char*));
+            for (int i=0; i<5; i++)
+            {
+                redirectcmd1[i] = (char*) malloc (sizeof(char));
+                redirectcmd2[i] = (char*) malloc (sizeof(char));
+            }
+
+            for (int i=0; argVector[i]!=NULL; i++)
+            {
+                if (strcmp(argVector[i], ">") == 0 || strcmp(argVector[i], ">>") == 0)
+                {
+                    if (i <= lastPipe)
+                    {
+                        printf("Error: Output Redirection before a pipe\n");
+                        redirect = 1;
+                        break;
+                    }
+                    
+                    for(int j = (lastPipe>0) ? lastPipe+1 : 0; j<i; j++)
+                    {
+                        if (lastPipe > 0)
+                            strcpy(redirectcmd1[j-lastPipe-1], argVector[j]); 
+                        else
+                            strcpy(redirectcmd1[j], argVector[j]);
+                    }
+                    if (lastPipe > 0)
+                        redirectcmd1[i-lastPipe-1] = 0; 
+                    else
+                        redirectcmd1[i] = 0;
+                    int j;
+                    for(j = i+1; argVector[j]!=NULL; j++)
+                    {
+                        strcpy(redirectcmd2[j-i-1], argVector[j]);
+                    }
+                    redirectcmd2[j-i-1] = 0;
+                    if (strcmp(argVector[i], ">") == 0)
+                        execRedirect(redirectcmd1, redirectcmd2, 0);
+                    else
+                        execRedirect(redirectcmd1, redirectcmd2, 2);
+                    redirect = 1;
+                    break;
+                }
+                
+                else if (strcmp(argVector[i], "<") == 0)
+                {
+                    for(int j = 0; j<i; j++)
+                    {
+                        strcpy(redirectcmd1[j], argVector[j]); 
+                    }
+                    redirectcmd1[i] = 0; 
+                    int j;
+                    for(j = i+1; argVector[j]!=NULL; j++)
+                    {
+                        strcpy(redirectcmd2[j-i-1], argVector[j]);
+                    }
+                    redirectcmd2[j-i-1] = 0;
+                    execRedirect(redirectcmd1, redirectcmd2, 1);
+                    redirect = 1;
+                    break;
+                }
+            }
+
+            if (redirect == 1)
+            {
+                for (int i=0; i<5; i++)
+                {
+                    free(redirectcmd1[i]);
+                    free(redirectcmd2[i]);
+                }
+                free(redirectcmd1);
+                free(redirectcmd2);
+                printPrompt();
+                continue;
+            }
             int pid = fork();
             childPID = pid;
+            //sigaction(SIGCHLD, &sa, NULL);
 
 			if (pid == 0)
 			{
@@ -701,7 +922,9 @@ int main(int argc, char* argv[])
 					// Add to foreground process group
 					pid_t cgrp = getpgrp();
 					// Problem with below line
-                    //tcsetpgrp(STDIN_FILENO, cgrp);
+                    signal(SIGTTOU, SIG_IGN);
+                    tcsetpgrp(STDIN_FILENO, cgrp);
+                    signal(SIGTTOU, SIG_DFL);
                     setpgid(getpgrp(), getppid());
 				}
 
@@ -747,27 +970,31 @@ int main(int argc, char* argv[])
                 else
                 {
                     int status;
-                    if(waitpid(-1, &status, WSTOPPED | WCONTINUED) >= 0){
-                        char c_status;
-                        c_status = WIFSTOPPED(status) ? 's' : WIFCONTINUED(status) ? 'c' : 'e';
-                        if(c_status == 's')
-                        {
+                    //if(waitpid(-1, &status, WSTOPPED | WCONTINUED) >= 0){
+                    waitpid(pid, &status, WUNTRACED);
+                    if (WSTOPSIG(status)) {
                             setpgid(pid, pid);
                             char* name = (char*) malloc (sizeof(char));
                             strcpy(name, argVector[0]);
                             Node node = {pid, name, STATUS_SUSPENDED, getpgrp()};
                             jobSet = insert(jobSet, node);
-                        }
+                            printf("suspended  %s %d\n", node.name, node.pid);
+                            signal(SIGTTOU, SIG_IGN);
+                            tcsetpgrp(0, getpid());
+                            signal(SIGTTOU, SIG_DFL);
                     }
+
                     //waitpid(pid, NULL, WUNTRACED);
                 }
                 isBackground = false;
-
-				//for(uint32_t i=0; i<argLength; i++)
-				//	free(argVector[i]);
-				//free(argVector);
-
 				printPrompt();
+                for (int i=0; i<5; i++)
+                {
+                    free(redirectcmd1[i]);
+                    free(redirectcmd2[i]);
+                }
+                free(redirectcmd1);
+                free(redirectcmd2);
 			}
 		}
 	}	
