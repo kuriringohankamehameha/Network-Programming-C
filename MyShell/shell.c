@@ -1,5 +1,4 @@
 #include "shell.h"
-#include<fcntl.h>
 
 #define MAX_NUM_PATHS 100
 #define uint32_t u_int32_t 
