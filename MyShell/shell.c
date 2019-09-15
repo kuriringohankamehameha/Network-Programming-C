@@ -174,14 +174,54 @@ char** argVector;
 int redirection_in_pipe = 0;
 int redirection_out_pipe = 0;
 int pipeCount = 0;
+char* USER;
+char* HOST;
+char* HOME;
+int HOME_LEN;
 
 // Initialize the jobSet
 Job* jobSet; 
 
-//static inline 
+char* replaceSubstring(char* str)
+{
+    char* ptr = strstr(str, HOME);
+    char* op = (char*) calloc (100, sizeof(char));
+    if (ptr)
+    {
+        op[0] = '~';
+        
+        if (str[HOME_LEN] == '\0')
+        {
+            op[1] = '\0';
+            return op;
+        }
+
+        for(int i=1; str[i]!='\0'; i++)
+        {
+            if (str[i+HOME_LEN-1] != '\0')
+                op[i] = str[i+HOME_LEN-1];
+            else
+            {
+                op[i] = '\0';
+                break;
+            }
+        }
+        return op;
+    }
+    return NULL;
+}
+
 void printPrompt()
 {
-    printf("%smyShell~: $ %s", COLOR_GREEN, COLOR_YELLOW);
+    char s[100];
+    char* op = replaceSubstring(getcwd(s, 100));
+    if (op != NULL)
+    {
+        printf("%s%s@pc:%s%s%s > $ %s", COLOR_CYAN, USER, COLOR_RED, op, COLOR_GREEN, COLOR_YELLOW);
+    }
+    else
+        printf("%s%s@pc:%s%s%s > $ %s", COLOR_CYAN, USER, COLOR_RED, getcwd(s,100), COLOR_GREEN, COLOR_YELLOW);
+
 }
 
 char* str_concat(char* s1, char* s2)
@@ -292,13 +332,50 @@ uint32_t getArgumentLength(char* command)
 	return count;
 }
 
-int builtin(char* command)
+int builtin(char** argVector)
 {
     // TODO (Vijay): Add builtin commmands
     // 1. kill
     // 2. bg
     // 3. joblist
-    // 4. cd
+    
+    // Change Directory Command
+    // The Shell itself changes it's current working directory
+    
+    int pos = -1;
+    if (argVector[1] != NULL && strcmp(argVector[0], "cd") == 0)
+    {
+        for(int i=0; argVector[1][i]!='\0'; i++)
+        {
+            if (argVector[1][0] == '~')
+            {
+                // Replace ~ with /home/$USR
+                pos = i;
+                break;
+            }
+        }
+        if ( pos != -1 )
+        {
+            char* op = (char*) calloc (100, sizeof(char));
+            int k = 0;
+            for (int i=0; argVector[1][i] != '\0'; i++)
+            {
+                if (i == 0)
+                {
+                    strncpy(op, HOME, HOME_LEN);
+                    k = k+HOME_LEN;
+                }
+                else
+                    op[k++] = argVector[1][i];
+            }
+            op[k] = '\0';
+            chdir(op);
+            free(op);
+        }
+        else
+            chdir(argVector[1]);
+        return 1;
+    }
     
 	return 0;
 }
@@ -660,6 +737,14 @@ int main(int argc, char* argv[])
 
 	sigprocmask(SIG_BLOCK, &set, NULL);
 
+    USER= (char*) calloc (30, sizeof(char));
+    HOST= (char*) calloc (30, sizeof(char));
+    HOME = (char*) calloc (40, sizeof(char));
+    USER = getenv("USER");
+    HOST = getenv("HOST");
+    HOME = getenv("HOME");
+    HOME_LEN = strlen(HOME);
+
 	printPrompt();
 
 	// Now start the event loop
@@ -697,12 +782,6 @@ int main(int argc, char* argv[])
 			continue;
 		}
 
-		if (builtin(buffer) == 1)
-		{
-			printPrompt();
-			continue;
-		}
-
 		else
 		{
 			argLength = getArgumentLength(buffer);
@@ -733,6 +812,13 @@ int main(int argc, char* argv[])
 
 			argVector[count][j] = '\0';
 			argVector[count + 1] = 0;
+            
+            if (builtin(argVector) == 1)
+            {
+                printPrompt();
+                continue;
+            }
+
 
 			if (strcmp(argVector[count], "&") == 0)
 			{
