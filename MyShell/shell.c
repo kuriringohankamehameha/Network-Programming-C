@@ -178,6 +178,7 @@ char* USER;
 char* HOST;
 char* HOME;
 int HOME_LEN;
+bool ignorePATH = false;
 
 // Initialize the jobSet
 Job* jobSet; 
@@ -339,12 +340,29 @@ int builtin(char** argVector)
     // 2. bg
     // 3. joblist
     
+    // Execute dot slash commands
+
+    if (argVector[1] == NULL && argVector[0][0] == '.' && argVector[0][1] == '/')
+    {
+        // Ignore PATH and simply execute from the current directory
+        if (argVector[0][2] == '\0')
+        {
+            printf("myShell: Executabe must be a valid string\n");
+            return 1;
+        }
+
+        argVector[0] ++;
+        ignorePATH = true;
+
+        return 0;
+    }
+
     // Change Directory Command
     // The Shell itself changes it's current working directory
-    
-    int pos = -1;
-    if (argVector[1] != NULL && strcmp(argVector[0], "cd") == 0)
+
+    else if (argVector[1] != NULL && strcmp(argVector[0], "cd") == 0)
     {
+        int pos = -1;
         for(int i=0; argVector[1][i]!='\0'; i++)
         {
             if (argVector[1][0] == '~')
@@ -1141,24 +1159,41 @@ int main(int argc, char* argv[])
 
                 childPID = getpid();
                 int curr = 0;
-                while (curr < pathLength)
+                
+                if (ignorePATH == false)
                 {
-                	if (execv(str_concat(PATH[curr], argVector[0]), argVector) < 0)
-                	{
-                		curr ++;
-                		if (curr == pathLength)
-                		{
-                			perror("Error");
-                            freeArgVector(argLength, argVector);
-                			exit(0);
-                		}
-                	}
+                    while (curr < pathLength)
+                    {
+                        if (execv(str_concat(PATH[curr], argVector[0]), argVector) < 0)
+                        {
+                            curr ++;
+                            if (curr == pathLength)
+                            {
+                                perror("Error");
+                                freeArgVector(argLength, argVector);
+                                exit(0);
+                            }
+                        }
+                    }
+                
                 }
 
+                else
+                {
+                    ignorePATH = false;
+                    char s[100];
+                    if ( execv(str_concat(getcwd(s, 100), argVector[0]), argVector) < 0 )
+                    {
+                        perror("Error");
+                        freeArgVector(argLength, argVector);
+                        exit(0);
+                    }
+                }
 			}
 
 			else
 			{
+                ignorePATH = false;
 				parentPID = getpid();
                 setpgid(0, 0);
                 if (isBackground)
