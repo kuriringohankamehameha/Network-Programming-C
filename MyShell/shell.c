@@ -172,6 +172,9 @@ char** PATH; // PATH Variable
 pid_t childPID, parentPID;
 bool isBackground = false;
 char** argVector;
+int redirection_in_pipe = 0;
+int redirection_out_pipe = 0;
+int pipeCount = 0;
 
 // Initialize the jobSet
 Job* jobSet; 
@@ -403,9 +406,72 @@ int getPIDfromname(Job* jobSet, char* name)
 
 void executePipe(char ***cmd)
 {
+    // Precondition : a < b | c can occur only if < is before the first pipe symbol
     int p[2];
     int pid;
     int fd_in = 0;
+    int file_fd_in = -1;
+    int file_fd_out = -1;
+    int save_in = dup(STDIN_FILENO);
+    int save_out = dup(STDOUT_FILENO);
+    
+    if (redirection_in_pipe == 1)
+    {
+        for (int i=0; cmd[0][i]!=NULL; i++)
+        {
+            if (strcmp(cmd[0][i], "<") == 0)
+            {
+                if (cmd[0][i+1] == NULL)
+                {
+                    printf("Error: Redirection File does not exist\n");
+                    return;
+                }
+
+                // Check if file exists
+                if (access(cmd[0][i+1], F_OK) == -1)
+                {
+                    printf("myShell: No such file or directory : %s\n", cmd[0][i+1]);
+                    return;
+                }
+
+                char* filename = (char*) calloc (strlen(cmd[0][i+1])+1, sizeof(char));
+                strcpy(filename, cmd[0][i+1]);
+                file_fd_in = open(filename, O_RDONLY, 0400);
+
+                cmd[0][i+1] = 0;
+                cmd[0][i] = 0;
+                
+                dup2(file_fd_in, STDIN_FILENO);
+                close(file_fd_in);
+            }
+        }
+    }
+
+    if (redirection_out_pipe == 1)
+    {
+        for (int i=0; cmd[pipeCount][i]!=NULL; i++)
+        {
+            if (strcmp(cmd[pipeCount][i], ">") == 0 || strcmp(cmd[pipeCount][i], ">>") == 0)
+            {
+                if (cmd[pipeCount][i+1] == NULL)
+                {
+                    printf("Error: Redirection File does not exist\n");
+                    return;
+                }
+
+                char* filename = (char*) calloc (strlen(cmd[pipeCount][i+1])+1, sizeof(char));
+                strcpy(filename, cmd[pipeCount][i+1]);
+                
+                if (strcmp(cmd[pipeCount][i], ">") == 0)
+                    file_fd_out = open(filename, O_WRONLY | O_CREAT, 0644);
+                else
+                    file_fd_out = open(filename, O_WRONLY | O_APPEND | O_CREAT, 0644);
+                
+                cmd[pipeCount][i+1] = 0;
+                cmd[pipeCount][i] = 0;
+            }
+        }
+    }
 
     while (*cmd != NULL)
     {
@@ -417,11 +483,20 @@ void executePipe(char ***cmd)
         }
         else if (pid == 0)
         {
-            dup2(fd_in, 0);
-            if(*(cmd + 1) != NULL)
+            dup2(fd_in, STDIN_FILENO);
+            if (*(cmd + 1) != NULL)
             {
-                dup2(p[1], 1);
+                dup2(p[1], STDOUT_FILENO);
             }
+            else
+            {
+                if (redirection_out_pipe == 1)
+                {
+                    dup2(file_fd_out, STDOUT_FILENO);
+                    close(file_fd_out);
+                }
+            }
+            
             close(p[0]);
             execvp((*cmd)[0], *cmd);
             exit(1);
@@ -433,6 +508,18 @@ void executePipe(char ***cmd)
             cmd++;
         }
     }
+    if (redirection_in_pipe == 1)
+    {
+        dup2(save_in, STDIN_FILENO);
+        close(save_in);
+    }
+    if (redirection_out_pipe == 1)
+    {
+        dup2(save_out, STDOUT_FILENO);
+        close(save_out);
+    }
+
+    pipeCount = 0;
 }
 
 void execRedirect(char** cmd1, char** cmd2, int redirection)
@@ -579,6 +666,8 @@ int main(int argc, char* argv[])
 	// Now start the event loop
 	while((buffer = lineget()))
     {
+        redirection_in_pipe = 0;
+        redirection_out_pipe = 0;
         for (uint32_t i=0; buffer[i] != '\0'; i++)
 			if (buffer[i] == '\n')
 				buffer[i] = '\0';
@@ -737,24 +826,39 @@ int main(int argc, char* argv[])
             char*** commands;
             int a = 0;
             int lastPipe = 0;
-            int pipeCount = 0;
+            int badRedirectpipe = 0;
+            int argCount = 0;
+            
+            commands = (char***) calloc (20, sizeof(char**));
+            for (int i=0; i<20; i++)
+            {
+                commands[i] = (char**) calloc (20, sizeof(char*));
+                for (int j=0; j<20; j++)
+                {
+                    commands[i][j] = (char*) malloc (sizeof(char));
+                }
+            }
 
             for (int i=0; argVector[i] != NULL; i++)
             {
+                argCount ++;
                 if (strcmp(argVector[i], "|") == 0)
                 {
-                    if (lastPipe == 0)
+                    if (i > 2 && strcmp(argVector[i-2], "<") == 0)
                     {
-                        commands = (char***) calloc (20, sizeof(char**));
-                        for (int i=0; i<20; i++)
+                        if (redirection_in_pipe == 0)
+                            redirection_in_pipe = 1;
+                        else
                         {
-                            commands[i] = (char**) calloc (20, sizeof(char*));
-                            for (int j=0; j<20; j++)
-                            {
-                                commands[i][j] = (char*) malloc (sizeof(char));
-                            }
+                            printf("Error: Multiple Indirection Operators with Pipes\n");
+                            badRedirectpipe = 1;
+                            break;
                         }
 
+                    }
+
+                    if (lastPipe == 0)
+                    {
                         for (a=0; a<i; a++)
                         {
                             commands[pipeCount][a] = (char*) realloc (commands[pipeCount][a], strlen(argVector[a])+1);    
@@ -786,6 +890,12 @@ int main(int argc, char* argv[])
 
                }
             }
+
+            if (badRedirectpipe == 1)
+            {
+                printPrompt();
+                continue;
+            }
             
             if (pipeCount > 0)
             {
@@ -802,6 +912,22 @@ int main(int argc, char* argv[])
                 // Now, I must have a NULL terminated array of Commands
                 commands[pipeCount+1][a] = 0;
                 commands[pipeCount+1] = 0;
+            }
+
+            if (pipeCount > 0)
+            {
+                if (argCount >= 2 && (strcmp(argVector[argCount-2], ">") == 0 || strcmp(argVector[argCount-2], ">>") == 0))
+                {
+                    // a | b > c
+                    if (redirection_out_pipe == 0)
+                        redirection_out_pipe = 1;
+                    else
+                    {
+                        printf("Error: Multiple Outdirection Operators with Pipes");
+                        badRedirectpipe = 1;
+                        break;
+                    }
+                }
             }
 
 

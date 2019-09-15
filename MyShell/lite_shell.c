@@ -408,66 +408,9 @@ void executePipe(char ***cmd)
     int p[2];
     int pid;
     int fd_in = 0;
-    
-    if (redirection_in_pipe == 1)
-    {
-        for (int i=0; cmd[0][i]!=NULL; i++)
-        {
-            if (strcmp(cmd[0][i], "<") == 0)
-            {
-                if (cmd[0][i+1] == NULL)
-                {
-                    printf("Error: Redirection File does not exist\n");
-                    return;
-                }
-
-                // Check if file exists
-                if (access(cmd[0][i+1], F_OK) == -1)
-                {
-                    printf("myShell: No such file or directory : %s\n", cmd[0][i+1]);
-                    return;
-                }
-
-                char* filename = (char*) calloc (strlen(cmd[0][i+1])+1, sizeof(char));
-                strcpy(filename, cmd[0][i+1]);
-                int fd = open(filename, O_RDONLY, 0644);
-
-                cmd[0][i+1] = 0;
-                cmd[0][i] = 0;
-                
-                int pid = fork();
-                int save_in = dup(STDIN_FILENO);
-                pipe(p);
-                if (pid == 0)
-                {
-                    dup2(fd, STDIN_FILENO);
-                    close(fd);
-                    dup2(p[1], STDOUT_FILENO);
-                    close(p[0]);
-                    execvp(cmd[0][0], cmd[0]);
-                    fprintf(stderr, "Failed to execute %s\n", cmd[0][0]);
-                }
-                else{
-                    wait(NULL);
-                    close(p[1]);
-                    fd_in = p[0];
-                    //dup2(save_in, STDIN_FILENO);
-                    //close(save_in);
-                }
-            }
-        }
-    }
 
     while (*cmd != NULL)
     {
-        if (redirection_in_pipe == 1)
-        {
-            //close(p[1]);
-            cmd++;
-            redirection_in_pipe = 0;
-            continue;
-        }
-        
         pipe(p);
         if ((pid = fork()) == -1)
         {
@@ -482,6 +425,51 @@ void executePipe(char ***cmd)
                 dup2(p[1], 1);
             }
             
+            if (redirection_in_pipe == 1)
+            {
+                for (int i=0; cmd[0][i]!=NULL; i++)
+                {
+                    if (strcmp(cmd[0][i], "<") == 0)
+                    {
+                        if (cmd[0][i+1] == NULL)
+                        {
+                            printf("Error: Redirection File does not exist\n");
+                            exit(0);
+                        }
+
+                        // Check if file exists
+                        if (access(cmd[0][i+1], F_OK) == -1)
+                        {
+                            printf("myShell: No such file or directory : %s\n", cmd[0][i+1]);
+                            exit(0);
+                        }
+
+                        char* filename = (char*) calloc (strlen(cmd[0][i+1])+1, sizeof(char));
+                        strcpy(filename, cmd[0][i+1]);
+                        int fd = open(filename, O_RDONLY, 0644);
+
+                        cmd[0][i+1] = 0;
+                        cmd[0][i] = 0;
+                        
+                        int pid = fork();
+                        int save_in = dup(STDIN_FILENO);
+                        if (pid == 0)
+                        {
+                            dup2(fd, STDIN_FILENO);
+                            close(fd);
+                            execvp(cmd[0][0], cmd[0]);
+                            fprintf(stderr, "Failed to execute %s\n", cmd[0][0]);
+                        }
+                        else{
+                            int status;
+                            waitpid(pid, &status, NULL);
+                            dup2(save_in, STDIN_FILENO);
+                            close(save_in);
+                        }
+                        redirection_in_pipe = 0;
+                    }
+                }
+            }
             close(p[0]);
             execvp((*cmd)[0], *cmd);
             exit(1);
@@ -493,7 +481,6 @@ void executePipe(char ***cmd)
             cmd++;
         }
     }
-    redirection_in_pipe = 0;
 }
 
 void execRedirect(char** cmd1, char** cmd2, int redirection)

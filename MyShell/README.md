@@ -7,3 +7,4 @@
 
 # Bugs
 * Running `fg` on a backgrounded process sometimes does not resolve by name
+* Running redirect with pipes does not give STDOUT back to the tty
