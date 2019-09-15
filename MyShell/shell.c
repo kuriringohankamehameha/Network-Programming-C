@@ -335,10 +335,9 @@ uint32_t getArgumentLength(char* command)
 
 int builtin(char** argVector)
 {
-    // TODO (Vijay): Add builtin commmands
+    // TODO (Vijay): Add more builtin commmands
     // 1. kill
-    // 2. bg
-    // 3. joblist
+    // 2. joblist
     
     // Execute dot slash commands
 
@@ -426,6 +425,10 @@ void shellfgCommand(int pid)
 
         // Make the pid get the terminal control
         printf("[fg]  + %d continued  %s\n", temp->node.pid, temp->node.name);
+        
+        // Remove the job from the jobSet
+        removeJob(jobSet, pid);
+
         if (tcsetpgrp(0, pid) < 0)
 			perror ("tcsetpgrp()");
 
@@ -445,7 +448,7 @@ void shellfgCommand(int pid)
 
 void shellbgCommand(int pid)
 {
-    // Resumes a job in the background
+    // Resumes a previously suspended job in the background
 
     Job* temp = findPID(jobSet, pid);
     if (temp && temp->node.pid != parentPID)   
@@ -456,17 +459,19 @@ void shellbgCommand(int pid)
             return;
         }
 
-        jobSet = changeStatus(jobSet, pid, STATUS_BACKGROUND);
-
         if (kill(-pid, SIGCONT) < 0)
         {
-            printf("myShell: bg %d: no such job\n", pid);
-            return;
+            if (kill(pid, SIGCONT) < 0)
+            {
+                printf("myShell: bg %d: no such job\n", pid);
+                return;
+            }
         }
 
-        printf("[bg]  + %d continued  %s\n", temp->node.pid, temp->node.name);
-        if (tcsetpgrp(pid, pid) < 0)
-            perror ("tcsetpgrp()");
+        printf("[bg]  + %d continued  %s &\n", temp->node.pid, temp->node.name);
+        jobSet = changeStatus(jobSet, pid, STATUS_BACKGROUND);
+        
+        setpgid(0, 0);
 
         signal(SIGTTOU, SIG_IGN);
         tcsetpgrp(0, getpid());
@@ -517,7 +522,7 @@ void executePipe(char ***cmd)
             {
                 if (cmd[0][i+1] == NULL)
                 {
-                    printf("Error: Redirection File does not exist\n");
+                    printf("myShell: Redirection File does not exist\n");
                     return;
                 }
 
@@ -549,7 +554,7 @@ void executePipe(char ***cmd)
             {
                 if (cmd[pipeCount][i+1] == NULL)
                 {
-                    printf("Error: Redirection File does not exist\n");
+                    printf("myShell: Redirection File does not exist\n");
                     return;
                 }
 
@@ -629,7 +634,7 @@ void execRedirect(char** cmd1, char** cmd2, int redirection)
 
     if (count2 > 1)
     {
-        printf("Error : Can only redirect to a File\n");
+        printf("myShell: Can only redirect to a File\n");
         return;
     }
 
@@ -644,7 +649,7 @@ void execRedirect(char** cmd1, char** cmd2, int redirection)
         // <
         if (count2 > 1)
         {
-            printf("Error : Can only redirect \'<\' from a File\n");
+            printf("myShell: Can only redirect \'<\' from a File\n");
             return;
         }
 
@@ -910,7 +915,7 @@ int main(int argc, char* argv[])
                         }
                         free(name);
                     }
-                    shellfgCommand( pid == -1 ? atoi (argVector[1]) : pid );
+                    shellbgCommand( pid == -1 ? atoi (argVector[1]) : pid );
                     freeArgVector(argLength, argVector);
                     printPrompt();
                     isBackground = false;
@@ -953,7 +958,7 @@ int main(int argc, char* argv[])
                             redirection_in_pipe = 1;
                         else
                         {
-                            printf("Error: Multiple Indirection Operators with Pipes\n");
+                            printf("myShell: Multiple Indirection Operators with Pipes\n");
                             badRedirectpipe = 1;
                             break;
                         }
@@ -1026,7 +1031,7 @@ int main(int argc, char* argv[])
                         redirection_out_pipe = 1;
                     else
                     {
-                        printf("Error: Multiple Outdirection Operators with Pipes");
+                        printf("myShell: Multiple Outdirection Operators with Pipes");
                         badRedirectpipe = 1;
                         break;
                     }
@@ -1064,7 +1069,7 @@ int main(int argc, char* argv[])
                 {
                     if (i <= lastPipe)
                     {
-                        printf("Error: Output Redirection before a pipe\n");
+                        printf("myShell: Output Redirection before a pipe\n");
                         redirect = 1;
                         break;
                     }
