@@ -6,3 +6,5 @@
 #include<sys/types.h>
 #include<signal.h>
 #include<fcntl.h>
+#include<sys/msg.h>
+#include<sys/wait.h>

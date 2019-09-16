@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include "shell.h"
 
 #define MAX_NUM_PATHS 100
@@ -14,6 +15,7 @@ enum _Status { STATUS_SUSPENDED, STATUS_BACKGROUND, STATUS_FOREGROUND };
 
 typedef struct _Job_t Job;
 typedef struct _Node_t Node;
+typedef struct _Message_t Message;
 typedef enum _Status Status;
 typedef enum bool bool; 
 
@@ -33,6 +35,11 @@ struct _Job_t{
 	Node node;
 	Job* next;
 
+};
+
+struct _Message_t{
+    long mtype;
+    char mtext[8192];
 };
 
 // Create the struct
@@ -672,7 +679,7 @@ void execRedirect(char** cmd1, char** cmd2, int redirection)
         }
         else{
             int status;
-            waitpid(pid, &status, NULL);
+            waitpid(pid, &status, 0);
             dup2(save_in, STDIN_FILENO);
             close(save_in);
         }
@@ -694,10 +701,19 @@ void execRedirect(char** cmd1, char** cmd2, int redirection)
     }
     else{
         int status;
-        waitpid(pid, &status, NULL);
+        waitpid(pid, &status, 0);
         dup2(save_out, STDOUT_FILENO);
         close(save_out);
     }
+}
+
+void shellMsgQ()
+{
+    // ls ## wc , sort using Message Queues
+   int fd[2];
+   pipe(fd);
+
+    
 }
 
 char* lineget(void) {

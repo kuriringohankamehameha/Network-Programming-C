@@ -1,4 +1,6 @@
 # TODO
+* Support `##` Operation using Message Queues
+* Support `SS` Operation using Shared Memory
 * Add some builtin commands
 * Refactor Code
 
