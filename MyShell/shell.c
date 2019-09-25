@@ -727,7 +727,6 @@ void execRedirect(char** cmd1, char** cmd2, int redirection)
 void shellMsgQ(char** command, char*** outputs)
 {
     // ls ## wc , sort using Message Queues
-    int pid;
     int msgqid = msgget(IPC_PRIVATE, IPC_CREAT | 0666);
 
     // Create the message Queue
@@ -813,7 +812,6 @@ void shellMsgQ(char** command, char*** outputs)
 void shellShm(char** command, char*** outputs)
 {
     // ls SS wc , sort using Shared Memory
-    int pid;
     int key = ftok("shmfile", 65);
     int shmid = shmget(key, 4096, IPC_CREAT | 0666);
 
@@ -944,7 +942,7 @@ int main(int argc, char* argv[])
 	int signalArray[] = {SIGINT, SIGKILL, SIGTSTP, -1};
 	sigset_t set = createSignalSet(signalArray);
 	struct sigaction sa = {0};
-	sa.sa_handler = shellHandler;
+	sa.sa_sigaction = shellHandler;
 	sa.sa_flags = SA_SIGINFO;
 
 	sigprocmask(SIG_BLOCK, &set, NULL);
@@ -973,6 +971,7 @@ int main(int argc, char* argv[])
             {   // Background Job has returned
                 //printf("[bg]  %d finished\n", curr->node.pid);
                 jobSet = removeJob(jobSet, curr->node.pid);
+                curr = jobSet;
             }
             curr = curr->next;
         }	

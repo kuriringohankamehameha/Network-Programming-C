@@ -2,6 +2,11 @@
 
 This is a simple UNIX Shell made from scratch as part of a Systems programming exercise, implemented in C. This supports basic UNIX shell features and a few more custom commands.
 
+## Screenshot
+
+![alt text](https://imgur.com/NFA9z5f)
+
+
 ## Compile and Run (For POSIX based Systems)
 * Compile using :
 `make`
@@ -11,6 +16,7 @@ This is a simple UNIX Shell made from scratch as part of a Systems programming e
 
 ## Features
 * Basic Unix Shell Operations like Job Control, Process Groups, execution of `UNIX` commands.
+* Can change the current working directory of the Shell using `cd` command. Home directory can also be interchanged with `~` when changing directories.
 * Allows the user to add any directory to the `.myshellrc` configuration file to add to the local `PATH` variable for the Shell. The Shell looks into all these directories one by one, and tries executing each line until there is a success. Otherwise, a suitable error message is printed.
 * Foreground and Background Job Control using `fg` and `bg` commands.
 * Pipe `|` Operator for redirecting commands to another command.
@@ -27,3 +33,4 @@ This is a simple UNIX Shell made from scratch as part of a Systems programming e
 * Suspend signal does not work as intended, if the background job waits for `tty` as input.
 * `##` Operation for piping via System V Message Queues does not presently support chaining with pipes and redirection operators.
 * `SS` Operation for piping via Shared Memory does not presently support chaining with pipes and redirection operators.
+* As of now, any command executes as expected only if there is atleast one space between any two keywords. Even if you want to get the output to multiple commands using `,`, you still need to insert a space before and after the comma.
