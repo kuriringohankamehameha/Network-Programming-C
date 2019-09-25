@@ -1,6 +1,6 @@
 # Features
 * Basic Unix Shell Operations like Job Control, Process Groups, execution of `UNIX` commands.
-* Foreground and Background Job COntrol using `fg` and `bg` commands.
+* Foreground and Background Job Control using `fg` and `bg` commands.
 * Pipe `|` Operator for redirecting commands to another command.
 * Redirection `>` and `<` Operators for input / output redirection from / to a file respectively.
 * Support for System V Message Queues using `##` operator. This passes the output of an input command via Message Queues, which then pipes it to other commands.
@@ -11,7 +11,7 @@
 * Refactor Code.
 
 # Bugs
-* Running `fg` on a backgrounded process sometimes does not resolve by name.
-* Suspend signal does not work as intended.
+* Running `fg` on a backgrounded job sometimes does not resolve by name.
+* Suspend signal does not work as intended, if the background job waits for `tty` as input.
 * `##` Operation for piping via System V Message Queues does not presently support chaining with pipes and redirection operators.
 * `SS` Operation for piping via Shared Memory does not presently support chaining with pipes and redirection operators.
