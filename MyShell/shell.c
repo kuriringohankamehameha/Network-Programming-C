@@ -10,7 +10,7 @@
 #define COLOR_GREEN "\033[0;32;32m"
 #define COLOR_GRAY "\033[1;30m"
 
-enum bool {false = 0, true = ~0};
+enum bool { false = 0, true = ~0 };
 enum _Status { STATUS_SUSPENDED, STATUS_BACKGROUND, STATUS_FOREGROUND };
 
 typedef struct _Job_t Job;
@@ -182,13 +182,26 @@ int redirection_in_pipe = 0;
 int redirection_out_pipe = 0;
 int pipeCount = 0;
 char* USER;
-char* HOST;
 char* HOME;
 int HOME_LEN;
 bool ignorePATH = false;
+char** command;
+char*** msgOutputs;
+int msgqueue = 0;
 
 // Initialize the jobSet
 Job* jobSet; 
+
+void freePATH();
+
+void destroyGlobals()
+{
+    // Destroy all globals
+    freePATH();
+    free(USER);
+    free(HOME);
+    freeJobs(jobSet);
+}
 
 char* replaceSubstring(char* str)
 {
@@ -256,7 +269,7 @@ static void shellHandler(int signo, siginfo_t* info, void* context)
     {
         char* name = (char*) malloc (sizeof(char));
         strcpy(name, argVector[0]);
-        Node node = {childPID, name, STATUS_SUSPENDED, childPID};
+        Node node = { childPID, name, STATUS_SUSPENDED, childPID };
         jobSet = insert(jobSet, node); 
         printList(jobSet);
         setpgid(childPID, childPID);
@@ -572,6 +585,8 @@ void executePipe(char ***cmd)
                     file_fd_out = open(filename, O_WRONLY | O_CREAT, 0644);
                 else
                     file_fd_out = open(filename, O_WRONLY | O_APPEND | O_CREAT, 0644);
+
+                free(filename);
                 
                 cmd[pipeCount][i+1] = 0;
                 cmd[pipeCount][i] = 0;
@@ -707,12 +722,89 @@ void execRedirect(char** cmd1, char** cmd2, int redirection)
     }
 }
 
-void shellMsgQ()
+void shellMsgQ(char** command, char*** outputs)
 {
     // ls ## wc , sort using Message Queues
-   int fd[2];
-   pipe(fd);
+    int pid;
+    int msgqid = msgget(IPC_PRIVATE, IPC_CREAT | 0666);
 
+    // Create the message Queue
+    if (msgqid == -1)
+    {
+        perror("Create msgqid");
+        exit(0);
+    }   
+    
+    Message message;
+    message.mtype = 23;
+    memset(&(message.mtext), 0, 8192 * sizeof(char));
+
+    char* temp = (char*) malloc (sizeof(char));
+    
+    for (int i=0; command[i]!=NULL; i++)
+    {
+        if (i == 0)
+            strcpy(temp, command[i]);
+
+        else
+            temp = str_concat(temp, command[i]);
+
+        if (command[i+1] != NULL){
+            temp = str_concat(temp, " ");
+        }
+
+    }
+    
+    if (fork() == 0)
+    {
+        FILE* cmd = popen(temp, "r"); 
+        int SIZE = 8192;
+        char buffer[SIZE];
+
+        size_t n;
+        while((n = fread(buffer, 1, sizeof(buffer)-1, cmd)) > 0)
+            buffer[n] = '\0';
+
+        pclose(cmd);
+
+        strcpy(message.mtext, buffer);
+
+        if (msgsnd(msgqid, &message, sizeof(long) + (strlen(message.mtext) * sizeof(char)) + 1, 0) == -1){
+            perror("msgsnd");
+            exit(0);
+        }
+        exit(0);
+    }
+    wait(NULL);
+
+    if (msgrcv(msgqid, &message, 8192, 0, 0) == -1) {
+       perror("msgrcv");
+       return;
+   }
+   for (int i=0; outputs[i]!=NULL; i++)
+   {
+       if ( fork() == 0 )
+       {
+           char* blah = (char*) malloc (sizeof(char));
+           for(int j=0; outputs[i][j]!=NULL; j++)
+           {
+                if (j == 0)
+                    strcpy(blah, outputs[i][j]);
+                else
+                {
+                    blah = str_concat(blah, " ");
+                    blah = str_concat(blah, outputs[i][j]);   
+                }
+           }
+
+           FILE* inp = popen(str_concat("/bin/", blah), "w");
+           fputs(message.mtext, inp);
+           pclose(inp);
+           exit(0);
+       }
+       else
+           wait(NULL);
+   }
     
 }
 
@@ -777,10 +869,8 @@ int main(int argc, char* argv[])
 	sigprocmask(SIG_BLOCK, &set, NULL);
 
     USER= (char*) calloc (30, sizeof(char));
-    HOST= (char*) calloc (30, sizeof(char));
     HOME = (char*) calloc (40, sizeof(char));
     USER = getenv("USER");
-    HOST = getenv("HOST");
     HOME = getenv("HOME");
     HOME_LEN = strlen(HOME);
 
@@ -1132,6 +1222,56 @@ int main(int argc, char* argv[])
                     redirect = 1;
                     break;
                 }
+
+                // As of now, there's no support for Msg Queues with Pipes / Redirection
+                else if (strcmp(argVector[i], "##") == 0)
+                {
+                    command = (char**) malloc (20 * sizeof(char*));
+                    for (int j=0; j<20; j++)
+                        command[j] = (char*) malloc (sizeof(char));
+                    
+                    msgOutputs = (char***) malloc (20 * sizeof(char**));
+                    for (int j=0; j<20; j++)
+                    {
+                        msgOutputs[j] = (char**) malloc (5 * sizeof(char*));
+                        for(int k=0; k<5; k++)
+                            msgOutputs[j][k] = (char*) malloc (sizeof(char));
+                    }
+
+                    for(int j=0; j<i; j++)
+                    {
+                        strcpy(command[j], argVector[j]);
+                    }
+                    command[i] = NULL;
+
+                    int k=0;
+                    int l = 0;
+
+                    for(int j=i+1; argVector[j]!=NULL; j++)
+                    {
+                        if (strcmp(argVector[j], ",") == 0)
+                        {
+                            msgOutputs[k][l++] = 0;
+                            k++;
+                            l = 0;
+                        }
+                        else{
+                            strcpy(msgOutputs[k][l++], argVector[j]);
+                            if (argVector[j+1] == NULL)
+                                msgOutputs[k][l] = 0;
+                        }
+                    }
+                    msgOutputs[k+1] = 0;
+                    msgqueue = 1;
+                }
+            }
+
+            if ( msgqueue == 1 )
+            {
+                msgqueue = 0;
+                shellMsgQ(command, msgOutputs);
+                printPrompt();
+                continue;
             }
 
             if (redirect == 1)
@@ -1146,6 +1286,7 @@ int main(int argc, char* argv[])
                 printPrompt();
                 continue;
             }
+
             int pid = fork();
             childPID = pid;
             //sigaction(SIGCHLD, &sa, NULL);
@@ -1243,7 +1384,7 @@ int main(int argc, char* argv[])
                             setpgid(pid, pid);
                             char* name = (char*) malloc (sizeof(char));
                             strcpy(name, argVector[0]);
-                            Node node = {pid, name, STATUS_SUSPENDED, getpgrp()};
+                            Node node = { pid, name, STATUS_SUSPENDED, getpgrp() };
                             jobSet = insert(jobSet, node);
                             printf("suspended  %s %d\n", node.name, node.pid);
                             signal(SIGTTOU, SIG_IGN);
