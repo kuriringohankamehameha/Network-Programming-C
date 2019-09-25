@@ -4,7 +4,7 @@ This is a simple UNIX Shell made from scratch as part of a Systems programming e
 
 ## Screenshot
 
-![alt text](https://imgur.com/NFA9z5f)
+![](https://imgur.com/NFA9z5f?raw=true)
 
 
 ## Compile and Run (For POSIX based Systems)
