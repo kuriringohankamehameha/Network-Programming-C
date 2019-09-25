@@ -187,7 +187,9 @@ int HOME_LEN;
 bool ignorePATH = false;
 char** command;
 char*** msgOutputs;
+char*** shmOutputs;
 int msgqueue = 0;
+int shmemory = 0;
 
 // Initialize the jobSet
 Job* jobSet; 
@@ -808,6 +810,86 @@ void shellMsgQ(char** command, char*** outputs)
     
 }
 
+void shellShm(char** command, char*** outputs)
+{
+    // ls ## wc , sort using Message Queues
+    int pid;
+    int key = ftok("shmfile", 65);
+    int shmid = shmget(key, 4096, IPC_CREAT | 0666);
+
+    // Create the message Queue
+    if (shmid == -1)
+    {
+        perror("shmid");
+        exit(0);
+    }   
+    
+    char* temp = (char*) malloc (sizeof(char));
+    
+    for (int i=0; command[i]!=NULL; i++)
+    {
+        if (i == 0)
+            strcpy(temp, command[i]);
+
+        else
+            temp = str_concat(temp, command[i]);
+
+        if (command[i+1] != NULL){
+            temp = str_concat(temp, " ");
+        }
+
+    }
+    
+    if (fork() == 0)
+    {
+        char* str = (char*) shmat(shmid, (void*)0,0);
+        FILE* cmd = popen(temp, "r"); 
+        int SIZE = 8192;
+        char buffer[SIZE];
+
+        size_t n;
+        while((n = fread(buffer, 1, sizeof(buffer)-1, cmd)) > 0)
+            buffer[n] = '\0';
+
+        pclose(cmd);
+
+        strcpy(str, buffer);
+        shmdt(str);
+
+        exit(0);
+    }
+    wait(NULL);
+
+    char* str = (char*) shmat(shmid, (void*)0,0);
+   for (int i=0; outputs[i]!=NULL; i++)
+   {
+        if ( fork() == 0 )
+        {
+           char* blah = (char*) malloc (sizeof(char));
+           for(int j=0; outputs[i][j]!=NULL; j++)
+           {
+                if (j == 0)
+                    strcpy(blah, outputs[i][j]);
+                else
+                {
+                    blah = str_concat(blah, " ");
+                    blah = str_concat(blah, outputs[i][j]);   
+                }
+           }
+
+           FILE* inp = popen(str_concat("/bin/", blah), "w");
+           fputs(str, inp);
+           pclose(inp);
+           exit(0);
+       }
+       else
+           wait(NULL);
+   }
+   shmdt(str);
+   shmctl(shmid, IPC_RMID, NULL);
+    
+}
+
 char* lineget(void) {
     char * line = malloc(100), * linep = line;
     size_t lenmax = 100, len = lenmax;
@@ -1264,6 +1346,47 @@ int main(int argc, char* argv[])
                     msgOutputs[k+1] = 0;
                     msgqueue = 1;
                 }
+                
+                else if (strcmp(argVector[i], "SS") == 0)
+                {
+                    command = (char**) malloc (20 * sizeof(char*));
+                    for (int j=0; j<20; j++)
+                        command[j] = (char*) malloc (sizeof(char));
+                    
+                    shmOutputs = (char***) malloc (20 * sizeof(char**));
+                    for (int j=0; j<20; j++)
+                    {
+                        shmOutputs[j] = (char**) malloc (5 * sizeof(char*));
+                        for(int k=0; k<5; k++)
+                            shmOutputs[j][k] = (char*) malloc (sizeof(char));
+                    }
+
+                    for(int j=0; j<i; j++)
+                    {
+                        strcpy(command[j], argVector[j]);
+                    }
+                    command[i] = NULL;
+
+                    int k=0;
+                    int l = 0;
+
+                    for(int j=i+1; argVector[j]!=NULL; j++)
+                    {
+                        if (strcmp(argVector[j], ",") == 0)
+                        {
+                            shmOutputs[k][l++] = 0;
+                            k++;
+                            l = 0;
+                        }
+                        else{
+                            strcpy(shmOutputs[k][l++], argVector[j]);
+                            if (argVector[j+1] == NULL)
+                                shmOutputs[k][l] = 0;
+                        }
+                    }
+                    shmOutputs[k+1] = 0;
+                    shmemory = 1;
+                }
             }
 
             if ( msgqueue == 1 )
@@ -1274,7 +1397,15 @@ int main(int argc, char* argv[])
                 continue;
             }
 
-            if (redirect == 1)
+            if ( shmemory == 1 )
+            {
+                shmemory = 0;
+                shellShm(command, shmOutputs);
+                printPrompt();
+                continue;
+            }
+
+            if ( redirect == 1 )
             {
                 for (int i=0; i<5; i++)
                 {

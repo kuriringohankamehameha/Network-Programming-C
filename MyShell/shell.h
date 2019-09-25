@@ -8,3 +8,4 @@
 #include<fcntl.h>
 #include<sys/msg.h>
 #include<sys/wait.h>
+#include<sys/shm.h>
