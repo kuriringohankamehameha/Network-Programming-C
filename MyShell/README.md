@@ -14,7 +14,7 @@ This is a simple UNIX Shell made from scratch as part of a Systems programming e
 * Allows the user to add any directory to the `.myshellrc` configuration file to add to the local `PATH` variable for the Shell. The Shell looks into all these directories one by one, and tries executing each line until there is a success. Otherwise, a suitable error message is printed.
 * Foreground and Background Job Control using `fg` and `bg` commands.
 * Pipe `|` Operator for redirecting commands to another command.
-* Redirection `>` and `<` Operators for input / output redirection from / to a file respectively.
+* Redirection `>`, `>>` and `<` Operators for input / output redirection from / to a file respectively.
 * Support for System V Message Queues using `##` operator. This passes the output of an input command via Message Queues, which then pipes it to other commands.
 * Support for Shared Memory Redirection using `SS` operator. This is similar to the `##` operator, but uses the system's Shared Memory for faster execution and does not have the limitation of a fixed buffer size like Message Queues.
 
