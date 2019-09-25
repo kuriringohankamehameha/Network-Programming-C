@@ -1,0 +1,4 @@
+total 100
+-rw-r--r-- 1 tobirama tobirama   119 Sep 15 22:23 1.txt
+-rw-r--r-- 1 tobirama tobirama     0 Sep 15 22:23 2.txt
+-rwxr-xr-x 1 tobirama tobirama 96192 Sep 15 22:22 tee
