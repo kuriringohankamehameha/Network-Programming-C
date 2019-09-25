@@ -787,19 +787,19 @@ void shellMsgQ(char** command, char*** outputs)
    {
        if ( fork() == 0 )
        {
-           char* blah = (char*) malloc (sizeof(char));
+           char* output_cmd = (char*) malloc (sizeof(char));
            for(int j=0; outputs[i][j]!=NULL; j++)
            {
                 if (j == 0)
-                    strcpy(blah, outputs[i][j]);
+                    strcpy(output_cmd, outputs[i][j]);
                 else
                 {
-                    blah = str_concat(blah, " ");
-                    blah = str_concat(blah, outputs[i][j]);   
+                    output_cmd = str_concat(output_cmd, " ");
+                    output_cmd = str_concat(output_cmd, outputs[i][j]);   
                 }
            }
 
-           FILE* inp = popen(str_concat("/bin/", blah), "w");
+           FILE* inp = popen(str_concat("/bin/", output_cmd), "w");
            fputs(message.mtext, inp);
            pclose(inp);
            exit(0);
@@ -812,12 +812,11 @@ void shellMsgQ(char** command, char*** outputs)
 
 void shellShm(char** command, char*** outputs)
 {
-    // ls ## wc , sort using Message Queues
+    // ls SS wc , sort using Shared Memory
     int pid;
     int key = ftok("shmfile", 65);
     int shmid = shmget(key, 4096, IPC_CREAT | 0666);
 
-    // Create the message Queue
     if (shmid == -1)
     {
         perror("shmid");
@@ -865,19 +864,19 @@ void shellShm(char** command, char*** outputs)
    {
         if ( fork() == 0 )
         {
-           char* blah = (char*) malloc (sizeof(char));
+           char* output_cmd = (char*) malloc (sizeof(char));
            for(int j=0; outputs[i][j]!=NULL; j++)
            {
                 if (j == 0)
-                    strcpy(blah, outputs[i][j]);
+                    strcpy(output_cmd, outputs[i][j]);
                 else
                 {
-                    blah = str_concat(blah, " ");
-                    blah = str_concat(blah, outputs[i][j]);   
+                    output_cmd = str_concat(output_cmd, " ");
+                    output_cmd = str_concat(output_cmd, outputs[i][j]);   
                 }
            }
 
-           FILE* inp = popen(str_concat("/bin/", blah), "w");
+           FILE* inp = popen(str_concat("/bin/", output_cmd), "w");
            fputs(str, inp);
            pclose(inp);
            exit(0);
