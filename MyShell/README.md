@@ -27,6 +27,7 @@ This is a simple UNIX Shell made from scratch as part of a Systems programming e
 ## TODO
 * Add some more builtin commands.
 * Refactor Code.
+* Have implemented a basic AutoComplete Engine using Tries. Incorporate it into the Shell, possibly with the help of the `ncurses` library.
 
 ## Bugs
 * Running `fg` on a backgrounded job sometimes does not resolve by name.
