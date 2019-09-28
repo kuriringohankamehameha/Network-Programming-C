@@ -18,6 +18,7 @@ This is a simple UNIX Shell made from scratch as part of a Systems programming e
 * Basic Unix Shell Operations like Job Control, Process Groups, execution of `UNIX` commands.
 * Can change the current working directory of the Shell using `cd` command. Home directory can also be interchanged with `~` when changing directories.
 * Allows the user to add any directory to the `.myshellrc` configuration file to add to the local `PATH` variable for the Shell. The Shell looks into all these directories one by one, and tries executing each line until there is a success. Otherwise, a suitable error message is printed.
+* Can execute `filename` having suitable execute permissions in the current working directory using `./filename`. (Dot Slash commands)
 * Foreground and Background Job Control using `fg` and `bg` commands.
 * Pipe `|` Operator for redirecting commands to another command.
 * Redirection `>`, `>>` and `<` Operators for input / output redirection from / to a file respectively.
