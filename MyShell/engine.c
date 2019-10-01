@@ -1,6 +1,9 @@
 #include "shell.h"
 #include <ncurses.h>
 
+#define gotoxy(x, y) printf("\033[%d;%dH", (y), (x))
+#define ALT_BACKSPACE 127
+
 typedef struct Node_t Node;
 
 struct Node_t{
@@ -13,6 +16,26 @@ char alphabets[] = {'a','b','c','d','e','f','g','h','i','j','k','l','m','n','o',
 
 static int a = 0;
 static int b = 0;
+static int completion_count = 0;
+
+/* Reference for our ncurses Window  and x,y coordinates of it's cursor */
+WINDOW* win;
+int x, y;
+
+void backspace()
+{
+    /* Set No Echo mode */
+    noecho();
+    nocbreak();
+    
+    /* Goto current cursor position and delete the previous character */
+    getyx(win, y, x);
+    move(y, x-1);
+    delch();
+    
+    cbreak();
+    refresh();
+}
 
 Node* newNode()
 {
@@ -80,8 +103,8 @@ void recursiveInsert(Node* temp, char** matches, int start, char* op)
     if(temp){
         if (temp->isEnd)
         {
-            //printf("%s\n", op);
             printw("%s\n", op);
+            completion_count ++;
         }
         for(int i=start; i<26; i++)
         {
@@ -121,9 +144,22 @@ int completeWord(Node* head, char* str, char** matches, char* op)
     return 0;
 }
 
+void clear_complete()
+{
+    /* Clears the previous autocomplete words from the Screen */
+    if (completion_count == 0)
+        return;
+    for(int i=0; i<completion_count; i++)
+    {
+        move(y+1+i, 0);
+        clrtoeol();
+    }
+    move(y, x);
+}
+
 int main()
 {
-    initscr();
+    win = initscr();
     cbreak();
     noecho();
 
@@ -151,10 +187,25 @@ int main()
         if (ch == '\t')
         {
             op[k] = '\0';
+            getyx(win, y, x);
+
+            /* Clear the previous completion words */
+            clear_complete();
+            
             completeWord(root, op, matches, op);
+            
+            completion_count = 0;
+            move(y, x);
+            clrtoeol();
+            
             strcpy(op, "0");
             k = 0;
         }   
+        else if (ch == ALT_BACKSPACE)
+        {
+            /* Check for backspace key (ch == 127) */
+            backspace();
+        }
         else
         {
             printw("%c", ch);
