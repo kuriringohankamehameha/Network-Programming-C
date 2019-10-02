@@ -113,7 +113,7 @@ char* str_concat(char* s1, char s2)
     return op;
 }
 
-void recursiveInsert(Node* temp, char** matches, int start, char* op)
+void recursiveInsert(Node* temp, int start, char* op)
 {
     if (start >= 27)
         return;
@@ -132,17 +132,15 @@ void recursiveInsert(Node* temp, char** matches, int start, char* op)
                 for (int j=0; j<27; j++)
                 {
                     match_child = temp->child[j];
-                    recursiveInsert(match_child, matches, 0, str_concat(op, alphabets[j]));
+                    recursiveInsert(match_child, 0, str_concat(op, alphabets[j]));
                 }
                 break;
             }
         }
-        a = 0;
-        b = 0;
     }
 }
 
-int completeWord(Node* head, char* str, char** matches, char* op)
+int completeWord(Node* head, char* str, char* op)
 {
     Node* temp = head;
     for(int i=0; str[i]!='\0'; i++)
@@ -156,7 +154,7 @@ int completeWord(Node* head, char* str, char** matches, char* op)
     if (temp != NULL)
     {
         printw("\n");
-        recursiveInsert(temp, matches, 0, op);
+        recursiveInsert(temp, 0, op);
         return 1;
     }   
     return 0;
@@ -226,10 +224,6 @@ int main()
     char* samples[] = {"thesis","omg", "theresa", "thevenin", "thames river", "lol"};
     int n = sizeof(samples)/sizeof(samples[0]);
     
-    char** matches = (char**) malloc (100 * sizeof(char*));
-    for(int i=0; i<100; i++)
-        matches[i] = (char*) malloc (sizeof(char));
-
     Node* root = newNode();
     for(int i=0; i<n; i++)
         insertTrie(root, samples[i]);
@@ -305,7 +299,7 @@ int main()
                 /* Clear the previous completion words */
                 clear_complete();
                 
-                completeWord(root, op, matches, op);
+                completeWord(root, op, op);
 
                 move(y, x);
                 clrtoeol();
@@ -346,9 +340,6 @@ int main()
         free(completion_arr[i]);
     free(completion_arr);
 
-    for(int i=0; i<100; i++)
-        free(matches[i]);
-    free(matches);
     free(op);
     free(tabbed_op);
     freeNode(root);
