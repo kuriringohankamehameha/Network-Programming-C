@@ -241,6 +241,8 @@ int main()
     int ch;
     int k;
     int tab_check = 0;
+    int xpos = -1;
+    int ypos = -1;
 
     completion_arr = (char**) malloc (MAX_WORDS * sizeof(char*));
     for(int i=0; i<MAX_WORDS; i++)
@@ -252,27 +254,30 @@ int main()
         k = 0;
         while( (ch = getch()) != '\n' )
         {
+            if (ch == ' ' && tab_check == 1)
+            {
+                getyx(win, y, x);
+                clear_complete();
+                completion_count = 0;
+                tab_count = 0;
+                getyx(win, ypos, xpos);
+            }
+
             if (ch == '\t')
             {
-                // TODO (Vijay) : Support for autocomplete in multiple arguments
-                int x0, y0;
-                getyx(win, y0, x0);
-                if (x0>=1)
+                if (xpos != -1)
                 {
-                    int k = x0;
-                    while(k >= 1){
-                        if (mvinch(y0, k) == ' ') {
-                            clear_complete();
-                            completion_count = 0;
-                            tab_check = 0;
-                            break;
-                        }
-                        k --;
-                    }   
+                    xpos = -1;
+                    if (mvinch(ypos, xpos+1) != '\n')
+                    {
+                        move(ypos, xpos+1);
+                    }
+                    else
+                    {
+                        continue;
+                    }
                 }
-                if (x0 >= 1)
-                    move(y0, x0);
-                    
+
                 if (tab_check == 1){
                     char* dup_op;
                     if ((dup_op = select_word()) != NULL)    
@@ -282,7 +287,6 @@ int main()
                         int pos = find_space();
                         replace_word(pos, tabbed_op);
                         tab_count = (tab_count + 1) % completion_count;
-                        //clear_complete();
                         continue;
                     }
                     else
@@ -292,10 +296,12 @@ int main()
                     tab_check = 1;
 
                 op[k] = '\0';
+                
                 getyx(win, y, x);
 
                 /* Clear the previous completion words */
                 clear_complete();
+                completion_count = 0;
                 
                 completeWord(root, op, matches, op);
 
@@ -309,19 +315,25 @@ int main()
             {
                 /* Check for backspace key (ch == 127) */
                 tab_check = 0;
+                tab_count = 0;
                 backspace();
+                xpos = -1;
             }
             else
             {
                 tab_check = 0;
+                tab_count = 0;
                 printw("%c", ch);
-                op[k++] = ch; 
+                xpos = -1;
+                if (ch != ' ')
+                    op[k++] = ch;
+                else
+                {
+                    k = 0;
+                }
             }       
         }
-        // NOTE : There are quite a few mistakes here. I have 
-        // not even stored the characters after the last space
-        // and that's why there are errors
-        
+
         getyx(win, y, x);
         clear_complete();
         op[k] = '\0';
