@@ -35,7 +35,7 @@ void backspace()
     getyx(win, y, x);
     move(y, x-1);
     delch();
-    
+
     cbreak();
     refresh();
 }
@@ -283,6 +283,12 @@ int main()
                         /* Replace current word with tabbed_op */
                         int pos = find_space();
                         replace_word(pos, tabbed_op);
+                        k = strlen(tabbed_op);
+
+                        /* This is not fixed */
+                        if (completion_count == 0)
+                            continue;
+
                         tab_count = (tab_count + 1) % completion_count;
                         continue;
                     }
@@ -303,9 +309,6 @@ int main()
 
                 move(y, x);
                 clrtoeol();
-                
-                strcpy(op, "0");
-                k = 0;
             }   
             else if (ch == ALT_BACKSPACE)
             {
@@ -314,6 +317,10 @@ int main()
                 tab_count = 0;
                 backspace();
                 xpos = -1;
+                if (k > 0)
+                {
+                    k--;
+                }
             }
             else
             {
@@ -324,9 +331,7 @@ int main()
                 if (ch != ' ')
                     op[k++] = ch;
                 else
-                {
                     k = 0;
-                }
             }       
         }
 
