@@ -3,6 +3,7 @@
 
 #define gotoxy(x, y) printf("\033[%d;%dH", (y), (x))
 #define ALT_BACKSPACE 127
+#define MAX_WORDS 10000
 
 typedef struct Node_t Node;
 
@@ -17,6 +18,8 @@ char alphabets[] = {'a','b','c','d','e','f','g','h','i','j','k','l','m','n','o',
 static int a = 0;
 static int b = 0;
 static int completion_count = 0;
+static char** completion_arr;
+int tab_count = 0;
 
 /* Reference for our ncurses Window  and x,y coordinates of it's cursor */
 WINDOW* win;
@@ -45,6 +48,20 @@ Node* newNode()
     for(int i=0; i<26; i++)
         head->child[i] = NULL;
     return head;
+}
+
+void freeNode(Node* node)
+{
+    for(int i=0; i<26; i++)
+    {
+        if (node->child[i] != NULL)
+            freeNode(node->child[i]);
+        else
+        {
+            free(node);
+            break;
+        }
+    }       
 }
 
 Node* insertTrie(Node* head, char* str)
@@ -103,8 +120,9 @@ void recursiveInsert(Node* temp, char** matches, int start, char* op)
     if(temp){
         if (temp->isEnd)
         {
-            printw("%s\n", op);
+            strcpy(completion_arr[completion_count], op);
             completion_count ++;
+            printw("%s\n", op);
         }
         for(int i=start; i<26; i++)
         {
@@ -157,6 +175,46 @@ void clear_complete()
     move(y, x);
 }
 
+char* select_word()
+{
+    /* Selects a word from the autocomplete list */
+    if (completion_count < tab_count)
+        return NULL;
+    return completion_arr[tab_count];
+}
+
+int find_space()
+{
+    /* Replaces the current cursor with tabbed_op */
+    char delim = ' ';
+    int x_curr = x-1;
+    int y_curr = y;
+    while(x_curr >= 0)
+    {
+        if (mvinch(y_curr, x_curr) == delim)
+        {
+            return x_curr;
+        }
+        else
+            x_curr --;
+    }
+    return 0;
+}
+
+void replace_word(int pos, char* tabbed_op)
+{
+    /* Replaces word at pos(x0, y0) with tabbed_op */
+    int y0 = y;
+    int x0 = pos != 0 ? pos + 1 : pos;
+   
+    move(y0, x0);
+    x = x0;
+    clrtoeol();
+    
+    for(int i=0; tabbed_op[i]!='\0'; i++)
+        printw("%c", tabbed_op[i]);
+}
+
 int main()
 {
     win = initscr();
@@ -181,38 +239,107 @@ int main()
     //completeWord(root, "th", matches, "th") ? printf("Yes\n") : printf("No\n");
 
     int ch;
-    int k = 0;
-    while( (ch = getch()) != '\n' )
-    {
-        if (ch == '\t')
-        {
-            op[k] = '\0';
-            getyx(win, y, x);
+    int k;
+    int tab_check = 0;
 
-            /* Clear the previous completion words */
-            clear_complete();
-            
-            completeWord(root, op, matches, op);
-            
-            completion_count = 0;
-            move(y, x);
-            clrtoeol();
-            
-            strcpy(op, "0");
-            k = 0;
-        }   
-        else if (ch == ALT_BACKSPACE)
+    completion_arr = (char**) malloc (MAX_WORDS * sizeof(char*));
+    for(int i=0; i<MAX_WORDS; i++)
+        completion_arr[i] = (char*) malloc (sizeof(char));
+
+    char* tabbed_op = (char*) malloc (sizeof(char));
+    do
+    {
+        k = 0;
+        while( (ch = getch()) != '\n' )
         {
-            /* Check for backspace key (ch == 127) */
-            backspace();
+            if (ch == '\t')
+            {
+                // TODO (Vijay) : Support for autocomplete in multiple arguments
+                int x0, y0;
+                getyx(win, y0, x0);
+                if (x0>=1)
+                {
+                    int k = x0;
+                    while(k >= 1){
+                        if (mvinch(y0, k) == ' ') {
+                            clear_complete();
+                            completion_count = 0;
+                            tab_check = 0;
+                            break;
+                        }
+                        k --;
+                    }   
+                }
+                if (x0 >= 1)
+                    move(y0, x0);
+                    
+                if (tab_check == 1){
+                    char* dup_op;
+                    if ((dup_op = select_word()) != NULL)    
+                    {
+                        strcpy(tabbed_op, dup_op);
+                        /* Replace current word with tabbed_op */
+                        int pos = find_space();
+                        replace_word(pos, tabbed_op);
+                        tab_count = (tab_count + 1) % completion_count;
+                        //clear_complete();
+                        continue;
+                    }
+                    else
+                        break;
+                }
+                else
+                    tab_check = 1;
+
+                op[k] = '\0';
+                getyx(win, y, x);
+
+                /* Clear the previous completion words */
+                clear_complete();
+                
+                completeWord(root, op, matches, op);
+
+                move(y, x);
+                clrtoeol();
+                
+                strcpy(op, "0");
+                k = 0;
+            }   
+            else if (ch == ALT_BACKSPACE)
+            {
+                /* Check for backspace key (ch == 127) */
+                tab_check = 0;
+                backspace();
+            }
+            else
+            {
+                tab_check = 0;
+                printw("%c", ch);
+                op[k++] = ch; 
+            }       
         }
-        else
-        {
-            printw("%c", ch);
-            op[k++] = ch; 
-        }       
+        // NOTE : There are quite a few mistakes here. I have 
+        // not even stored the characters after the last space
+        // and that's why there are errors
+        
+        getyx(win, y, x);
+        clear_complete();
+        op[k] = '\0';
+        completion_count = 0;
+        printw("\n");
     }
-    op[k] = '\0';
+    while(strcmp(op, "exit") != 0);
+
+    for(int i=0; i<MAX_WORDS; i++)
+        free(completion_arr[i]);
+    free(completion_arr);
+
+    for(int i=0; i<100; i++)
+        free(matches[i]);
+    free(matches);
+    free(op);
+    free(tabbed_op);
+    freeNode(root);
 
     endwin();
     return 0;
