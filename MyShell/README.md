@@ -36,3 +36,4 @@ This is a simple UNIX Shell made from scratch as part of a Systems programming e
 * `##` Operation for piping via System V Message Queues does not presently support chaining with pipes and redirection operators.
 * `SS` Operation for piping via Shared Memory does not presently support chaining with pipes and redirection operators.
 * As of now, any command executes as expected only if there is atleast one space between any two keywords. Even if you want to get the output to multiple commands using `,`, you still need to insert a space before and after the comma.
+* There is a lot of memory requirement for building the Trie for the Autocomplete Engine incase of a larger autocomplete list. A better solution could be to sort the autocomplete words and load the indices into a Tree like data structure for fast range querying. Optimize the memory limits and improve it's performance.
