@@ -9,11 +9,11 @@ typedef struct Node_t Node;
 
 struct Node_t{
     char data;
-    Node* child[26];
+    Node* child[27];
     int isEnd;
 };
 
-char alphabets[] = {'a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z'};
+char alphabets[] = {'a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z',' '};
 
 static int a = 0;
 static int b = 0;
@@ -45,14 +45,14 @@ Node* newNode()
     Node* head = (Node*) malloc (sizeof(Node));
     head->isEnd = 0;
     
-    for(int i=0; i<26; i++)
+    for(int i=0; i<27; i++)
         head->child[i] = NULL;
     return head;
 }
 
 void freeNode(Node* node)
 {
-    for(int i=0; i<26; i++)
+    for(int i=0; i<27; i++)
     {
         if (node->child[i] != NULL)
             freeNode(node->child[i]);
@@ -70,7 +70,7 @@ Node* insertTrie(Node* head, char* str)
     Node* temp = head;
     for (int i=0; str[i] != '\0'; i++)
     {
-        int position = str[i] - 'a';
+        int position = str[i] != ' ' ? str[i] - 'a' : 26;
         
         if (temp->child[position] == NULL)
             temp->child[position] = newNode();
@@ -115,7 +115,7 @@ char* str_concat(char* s1, char s2)
 
 void recursiveInsert(Node* temp, char** matches, int start, char* op)
 {
-    if (start >= 26)
+    if (start >= 27)
         return;
     if(temp){
         if (temp->isEnd)
@@ -124,12 +124,12 @@ void recursiveInsert(Node* temp, char** matches, int start, char* op)
             completion_count ++;
             printw("%s\n", op);
         }
-        for(int i=start; i<26; i++)
+        for(int i=start; i<27; i++)
         {
             if (temp->child[i])
             {
                 Node* match_child;
-                for (int j=0; j<26; j++)
+                for (int j=0; j<27; j++)
                 {
                     match_child = temp->child[j];
                     recursiveInsert(match_child, matches, 0, str_concat(op, alphabets[j]));
@@ -172,6 +172,7 @@ void clear_complete()
         move(y+1+i, 0);
         clrtoeol();
     }
+    completion_count = 0;
     move(y, x);
 }
 
@@ -222,7 +223,7 @@ int main()
     noecho();
 
     /* Engine Code here */
-    char* samples[] = {"thesis","omg", "theresa", "thevenin","lol"};
+    char* samples[] = {"thesis","omg", "theresa", "thevenin", "thames river", "lol"};
     int n = sizeof(samples)/sizeof(samples[0]);
     
     char** matches = (char**) malloc (100 * sizeof(char*));
@@ -234,9 +235,6 @@ int main()
         insertTrie(root, samples[i]);
 
     char* op = (char*) malloc (sizeof(char));
-    //searchTrie(root, "the") ? printf("Yes\n") : printf("No\n");
-    //searchTrie(root, "theresa") ? printf("Yes\n") : printf("No\n");
-    //completeWord(root, "th", matches, "th") ? printf("Yes\n") : printf("No\n");
 
     int ch;
     int k;
@@ -258,7 +256,6 @@ int main()
             {
                 getyx(win, y, x);
                 clear_complete();
-                completion_count = 0;
                 tab_count = 0;
                 getyx(win, ypos, xpos);
             }
@@ -301,7 +298,6 @@ int main()
 
                 /* Clear the previous completion words */
                 clear_complete();
-                completion_count = 0;
                 
                 completeWord(root, op, matches, op);
 
@@ -337,7 +333,6 @@ int main()
         getyx(win, y, x);
         clear_complete();
         op[k] = '\0';
-        completion_count = 0;
         printw("\n");
     }
     while(strcmp(op, "exit") != 0);
