@@ -15,8 +15,6 @@ struct Node_t{
 
 char alphabets[] = {'a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z',' '};
 
-static int a = 0;
-static int b = 0;
 static int completion_count = 0;
 static char** completion_arr;
 int tab_count = 0;
