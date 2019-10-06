@@ -448,11 +448,15 @@ void shellkillCommand(int pid, int signo)
 
 void shellfgCommand(int pid)
 {
-	Job* temp = findPID(jobSet, pid);
+    Job* temp = findPID(jobSet, pid);
+    kill(getpgid(pid), SIGTSTP);
 	if (temp && temp->node.status != STATUS_FOREGROUND)	
 	{
 		// Bring the process to foreground
         // First, give the pid a CONT signal to resume from suspended state
+        if (tcsetpgrp(0, pid) < 0)
+			perror ("tcsetpgrp()");
+
 		if (kill(-pid, SIGCONT) < 0)
         {
             if (kill(pid, SIGCONT) < 0)
@@ -468,17 +472,13 @@ void shellfgCommand(int pid)
         // Remove the job from the jobSet
         removeJob(jobSet, pid);
 
-        if (tcsetpgrp(0, pid) < 0)
-			perror ("tcsetpgrp()");
-
 		int status = 0;
         
         // Now the parent waits for the child to do it's job
         waitpid(pid, &status, WUNTRACED);
-        // Ignore SIGTTIN, SIGTTOU Signals till parents get back control
-		signal(SIGTTOU, SIG_IGN);
+        signal(SIGTTOU, SIG_IGN);
         tcsetpgrp(0, getpid());
-		signal(SIGTTOU, SIG_DFL);
+        signal(SIGTTOU, SIG_DFL);
 	}
 
 	else
