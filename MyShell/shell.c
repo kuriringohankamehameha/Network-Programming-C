@@ -10,6 +10,8 @@
 #define COLOR_GREEN "\033[0;32;32m"
 #define COLOR_GRAY "\033[1;30m"
 
+#define DEBUG 1
+
 enum bool { false = 0, true = ~0 };
 enum _Status { STATUS_SUSPENDED, STATUS_BACKGROUND, STATUS_FOREGROUND };
 
@@ -22,19 +24,15 @@ typedef enum bool bool;
 bool isSuspended = false;
 
 struct _Node_t{
-
 	int pid;
     char* name;
     Status status;
     int gid;
-
 };
 
 struct _Job_t{
-
 	Node node;
 	Job* next;
-
 };
 
 struct _Message_t{
@@ -42,9 +40,41 @@ struct _Message_t{
     char mtext[8192];
 };
 
-// Create the struct
+/* Declare all Global Variables here */
+char** PATH; // PATH Variable
+pid_t childPID, parentPID; // PIDs for Child and Parent Process
+bool isBackground = false; // Checks whether the child is a background process
+int bgcount = -1;
+int argLength = 0;
+char** argVector; // Argument Vector being passed to the Shell
+int redirection_in_pipe = 0; // For checking if there is an input redirection via pipe
+int redirection_out_pipe = 0; // For chcking if there is an output redirection via pipe
+int badRedirectpipe = 0; // Checks for valid Pipe redirection
+int pipeCount = 0; // Counter for the number of Pipes in the argVector
+bool redirect = false;
+char** redirectcmd1;
+char** redirectcmd2;
+int pipeargCount = 0;
+int lastPipe = 0; // Position of the last pipe symbol
+char* USER; // Current User
+char* HOME; // Home Directory
+char* HOST;
+int HOME_LEN;
+bool ignorePATH = false; // For executing dot slash command
+char** command;
+char*** commands;
+bool noinit_cmd = false;
+char*** msgOutputs;
+char*** shmOutputs;
+int msgqueue = 0;
+int shmemory = 0;
+char* current_directory;
+Job* jobSet; // Initialize the jobset
+
+/* Declare all Functions here */
 Job* createJobs(Node node)
 {
+    // Create the struct
 	Job* head = (Job*) malloc (sizeof(Job));
 	head->node = node;
 	head->next = NULL;
@@ -52,9 +82,9 @@ Job* createJobs(Node node)
 	return head;
 }
 
-// Insert a Job
 Job* insert(Job* head, Node node)
 {
+    // Insert a Job
 	Job* newnode = (Job*) malloc (sizeof(Job));
 	newnode->node = node;
 	newnode->next = NULL;
@@ -76,9 +106,9 @@ Job* insert(Job* head, Node node)
 
 }
 
-// Remove a Job
 Job* removeJob(Job* head, int pid)
 {
+    // Remove a Job
     if (isSuspended){
         isSuspended = false;
         return head;
@@ -170,81 +200,98 @@ void freeJobs(Job* jobSet)
     }
 }
 
-// Signal Handler Prototype
-void shellfgCommand(int pid);
-
-// Global Variables for Process Flow
-char** PATH; // PATH Variable
-pid_t childPID, parentPID;
-bool isBackground = false;
-char** argVector;
-int redirection_in_pipe = 0;
-int redirection_out_pipe = 0;
-int pipeCount = 0;
-char* USER;
-char* HOME;
-int HOME_LEN;
-bool ignorePATH = false;
-char** command;
-char*** msgOutputs;
-char*** shmOutputs;
-int msgqueue = 0;
-int shmemory = 0;
-
-// Initialize the jobSet
-Job* jobSet; 
-
 void freePATH();
 
 void destroyGlobals()
 {
     // Destroy all globals
+    free(current_directory);
     freePATH();
-    free(USER);
-    free(HOME);
     freeJobs(jobSet);
 }
 
-char* replaceSubstring(char* str)
+char** initDoubleGlobalCharPtr(int num_arrays)
+{
+    char** ptr = (char**) calloc (num_arrays, sizeof(char*));
+    for (int i=0; i<num_arrays; i++)
+        ptr[i] = (char*) malloc (sizeof(char));
+    return ptr;
+}
+
+void freeDoubleGlobalCharPtr(char*** ptr, int num_arrays)
+{
+    for (int i=0; i<num_arrays; i++)
+        free((*ptr)[i]);
+    free(*ptr);
+    *ptr = NULL;
+}
+
+char*** initTripleGlobalCharPtr(int num_arrays1, int num_arrays2)
+{
+    char*** ptr = (char***) calloc (num_arrays1, sizeof(char**));
+    for (int i=0; i<num_arrays1; i++)
+    {
+        ptr[i] = (char**) calloc (num_arrays2, sizeof(char*));
+        for (int j=0; j<num_arrays2; j++)
+            ptr[i][j] = (char*) malloc (sizeof(char));
+    }
+    return ptr;
+}
+
+void freeTripleGlobalCharPtr(char**** ptr, int num_arrays1, int num_arrays2)
+{
+    for (int i=0; i<num_arrays1 && (*ptr)[i]; i++)
+    {
+        for (int j=0; j<num_arrays2 && (*ptr)[i][j]; j++)
+            free((*ptr)[i][j]);
+        free((*ptr)[i]);
+    }
+    free(*ptr);
+    *ptr = NULL;
+}
+
+void replaceSubstring(char* str)
 {
     char* ptr = strstr(str, HOME);
-    char* op = (char*) calloc (100, sizeof(char));
     if (ptr)
     {
-        op[0] = '~';
+        current_directory[0] = '~';
         
         if (str[HOME_LEN] == '\0')
         {
-            op[1] = '\0';
-            return op;
+            current_directory[1] = '\0';
+            return;
         }
 
         for(int i=1; str[i]!='\0'; i++)
         {
             if (str[i+HOME_LEN-1] != '\0')
-                op[i] = str[i+HOME_LEN-1];
+                current_directory[i] = str[i+HOME_LEN-1];
             else
             {
-                op[i] = '\0';
+                current_directory[i] = '\0';
                 break;
             }
         }
-        return op;
+        return;
     }
-    return NULL;
+    return;
 }
 
 void printPrompt()
 {
-    char s[100];
-    char* op = replaceSubstring(getcwd(s, 100));
-    if (op != NULL)
+    gethostname(HOST, 100);
+    if (current_directory != NULL)
     {
-        printf("%s%s@pc:%s%s%s > $ %s", COLOR_CYAN, USER, COLOR_RED, op, COLOR_GREEN, COLOR_YELLOW);
+        printf("%s%s@%s:%s%s%s > $ %s", COLOR_CYAN, USER, HOST, COLOR_RED, current_directory, COLOR_GREEN, COLOR_YELLOW);
     }
     else
-        printf("%s%s@pc:%s%s%s > $ %s", COLOR_CYAN, USER, COLOR_RED, getcwd(s,100), COLOR_GREEN, COLOR_YELLOW);
-
+    {
+        char* s = (char*) malloc (100* sizeof(char));
+        current_directory = getcwd(s, 100);
+        printf("%s%s@%s:%s%s%s > $ %s", COLOR_CYAN, USER, HOST, COLOR_RED, current_directory, COLOR_GREEN, COLOR_YELLOW);
+        free(s);
+    }
 }
 
 char* str_concat(char* s1, char* s2)
@@ -258,38 +305,6 @@ char* str_concat(char* s1, char* s2)
         else
             op[i] = s2[i-l1];
     return op;
-}
-
-static void shellHandler(int signo, siginfo_t* info, void* context)
-{
-    if (signo == SIGINT)
-    {
-        signal(signo, SIG_DFL);
-    }
-
-    else if (signo == SIGTSTP)
-    {
-        char* name = (char*) malloc (sizeof(char));
-        strcpy(name, argVector[0]);
-        Node node = { childPID, name, STATUS_SUSPENDED, childPID };
-        jobSet = insert(jobSet, node); 
-        printList(jobSet);
-        setpgid(childPID, childPID);
-        kill(-childPID, SIGSTOP);
-    }
-
-    else if (signo == SIGCHLD)
-    {
-        Job* temp = findPID(jobSet, info->si_pid);
-        if (temp && temp->node.status == STATUS_BACKGROUND)
-        {
-            printf("[bg]  %s - %d finished\n", temp->node.name, info->si_pid);
-        }
-        fflush(stdout);
-        fflush(stdin);
-        //signal(SIGCHLD, SIG_DFL);
-    }
-
 }
 
 uint32_t setPATH(const char* filename)
@@ -326,11 +341,14 @@ uint32_t setPATH(const char* filename)
 		j = 0;
 	}
 
+    fclose(fp);
+
 	return pathLength;
 }
 
 sigset_t createSignalSet(int* signalArray)
 {
+    // Creates the Signal Set
 	sigset_t set;
 	sigemptyset(&set);
 	for(int i=0; signalArray[i]!=-1; i++)
@@ -344,15 +362,6 @@ void freePATH()
 	for (uint32_t i=0; i<MAX_NUM_PATHS; i++)
 		free(PATH[i]);
 	free(PATH);
-}
-
-uint32_t getArgumentLength(char* command)
-{
-	int count = 1;
-	for(uint32_t i=0; command[i] != '\0'; i++)
-		if(command[i] == ' ')
-			count ++;
-	return count;
 }
 
 int builtin(char** argVector)
@@ -413,6 +422,11 @@ int builtin(char** argVector)
         }
         else
             chdir(argVector[1]);
+
+        char* s = (char*) malloc (100*sizeof(char));
+        replaceSubstring(getcwd(s, 100));
+        free(s);
+        
         return 1;
     }
     
@@ -421,9 +435,14 @@ int builtin(char** argVector)
 
 void shellkillCommand(int pid, int signo)
 {
+    // Executes the Kill command on a process that is not the Parent or Child PID
+    if (pid == getpid() || pid == getppid()) {
+        printf("myShell: Cannot Kill parent process\n");
+        return;
+    }
+
     Job* temp = findPID(jobSet, pid);
     if (temp){
-
         // Send a Signal to the child process based on the number 
         kill(pid, signo); 
     }
@@ -505,9 +524,18 @@ void shellbgCommand(int pid)
 
 }
 
-void freeArgVector(int argLength, char** argVector)
+uint32_t getArgumentLength(char* command)
 {
-    for(int i=0; i<=argLength; i++)
+	int count = 1;
+	for(uint32_t i=0; command[i] != '\0'; i++)
+		if(command[i] == ' ' && command[i+1] != ' ' && command[i+1] != '\0')
+			count ++;
+	return count;
+}
+
+void freeArgVector()
+{
+    for(int i=0; i<argLength; i++)
         free(argVector[i]);
     free(argVector);
 }
@@ -527,7 +555,6 @@ int getPIDfromname(Job* jobSet, char* name)
 
 void executePipe(char ***cmd)
 {
-    // Precondition : a < b | c can occur only if < is before the first pipe symbol
     int p[2];
     int pid;
     int fd_in = 0;
@@ -641,19 +668,16 @@ void executePipe(char ***cmd)
         dup2(save_out, STDOUT_FILENO);
         close(save_out);
     }
-
-    pipeCount = 0;
 }
 
-void execRedirect(char** cmd1, char** cmd2, int redirection)
+void execRedirect(int redirection)
 {
-    // Check sizes of commmands
     int fd = -1;
     int count1 = 0;
     int count2 = 0;
-    for (int i=0; cmd1[i]!=NULL; i++)
+    for (int i=0; redirectcmd1[i]!=NULL; i++)
         count1 ++;
-    for (int i=0; cmd2[i]!=NULL; i++)
+    for (int i=0; redirectcmd2[i]!=NULL; i++)
         count2 ++;
 
     if (count2 > 1)
@@ -664,26 +688,26 @@ void execRedirect(char** cmd1, char** cmd2, int redirection)
 
     if (redirection == 0)
     {
-        // Redirection to output file >
-        fd = open(cmd2[0], O_WRONLY | O_CREAT, 0644);
+        // Output Redirection
+        fd = open(redirectcmd2[0], O_WRONLY | O_CREAT, 0644);
     }
 
     else if (redirection == 1)
     {
-        // <
+        // Input Redirection
         if (count2 > 1)
         {
             printf("myShell: Can only redirect \'<\' from a File\n");
             return;
         }
 
-        if (access(cmd2[0], F_OK) == -1)
+        if (access(redirectcmd2[0], F_OK) == -1)
         {
-            printf("myShell: No such file or directory : %s\n", cmd2[0]);
+            printf("myShell: No such file or directory : %s\n", redirectcmd2[0]);
             return;
         }
         
-        fd = open(cmd2[0], O_RDONLY, 0644);
+        fd = open(redirectcmd2[0], O_RDONLY, 0644);
 
         int pid = fork();
         int save_in = dup(STDIN_FILENO);
@@ -691,8 +715,8 @@ void execRedirect(char** cmd1, char** cmd2, int redirection)
         {
             dup2(fd, STDIN_FILENO);
             close(fd);
-            execvp(cmd1[0], cmd1);
-            fprintf(stderr, "Failed to execute %s\n", cmd2[0]);
+            execvp(redirectcmd1[0], redirectcmd1);
+            fprintf(stderr, "Failed to execute %s\n", redirectcmd2[0]);
         }
         else{
             int status;
@@ -704,7 +728,7 @@ void execRedirect(char** cmd1, char** cmd2, int redirection)
     }
     else if (redirection == 2)
     {
-        fd = open(cmd2[0], O_WRONLY | O_APPEND | O_CREAT, 0644);
+        fd = open(redirectcmd2[0], O_WRONLY | O_APPEND | O_CREAT, 0644);
     }
 
     int pid = fork();
@@ -713,8 +737,8 @@ void execRedirect(char** cmd1, char** cmd2, int redirection)
     {
         dup2(fd, STDOUT_FILENO);
         close(fd);
-        execvp(cmd1[0], cmd1);
-        fprintf(stderr, "Failed to execute %s\n", cmd1[0]);
+        execvp(redirectcmd1[0], redirectcmd1);
+        fprintf(stderr, "Failed to execute %s\n", redirectcmd1[0]);
     }
     else{
         int status;
@@ -724,7 +748,7 @@ void execRedirect(char** cmd1, char** cmd2, int redirection)
     }
 }
 
-void shellMsgQ(char** command, char*** outputs)
+void shellMsgQ(char*** outputs)
 {
     // ls ## wc , sort using Message Queues
     int msgqid = msgget(IPC_PRIVATE, IPC_CREAT | 0666);
@@ -809,7 +833,7 @@ void shellMsgQ(char** command, char*** outputs)
     
 }
 
-void shellShm(char** command, char*** outputs)
+void shellShm(char*** outputs)
 {
     // ls SS wc , sort using Shared Memory
     int key = ftok("shmfile", 65);
@@ -858,8 +882,8 @@ void shellShm(char** command, char*** outputs)
     wait(NULL);
 
     char* str = (char*) shmat(shmid, (void*)0,0);
-   for (int i=0; outputs[i]!=NULL; i++)
-   {
+    for (int i=0; outputs[i]!=NULL; i++)
+    {
         if ( fork() == 0 )
         {
            char* output_cmd = (char*) malloc (sizeof(char));
@@ -887,8 +911,12 @@ void shellShm(char** command, char*** outputs)
     
 }
 
-char* lineget(void) {
-    char * line = malloc(100), * linep = line;
+char* lineget(char* buffer) {
+    if (buffer == NULL)
+        buffer = malloc(100);
+        
+    char* line = buffer; 
+    char* linep = line;
     size_t lenmax = 100, len = lenmax;
     int c;
 
@@ -919,47 +947,583 @@ char* lineget(void) {
     return linep;
 }
 
-int main(int argc, char* argv[])
+int initArgs(char* buffer)
 {
-	// Set the PATH first
-	
-	uint32_t pathLength = setPATH(".myshellrc");
-	char* buffer = (char*) malloc (sizeof(char));
-    
-    int argLength = -1;
-    argVector = NULL;
+    int count = 0;
+    int j = 0;
+    for (uint32_t i=0; buffer[i] != '\0'; i++)
+    {
+        if (buffer[i] == ' ' && buffer[i+1] == ' ')
+        {
+            continue;
+        }
+        else if (buffer[i] == ' ')
+        {
+            argVector[count][j++] = '\0';
+            count++;
+            j = 0;
+        }
+        else
+        {
+            argVector[count][j] = buffer[i];
+            j++;
+        }
+    }
 
+    argVector[count][j] = '\0';
+    free(argVector[count+1]);
+    argVector[count + 1] = 0;
+    return count;
+}
+
+void exec_fg()
+{
+    int pid = -1;
+
+    if (jobSet)
+    {
+        if (argVector[1][0] == '%' && argVector[1][1] == '.' && argVector[1][2] != '\0')
+        {
+            // Search by name
+            char* name = (char*) malloc (sizeof(char));
+            
+            int i;
+            for (i=2; argVector[1][i] != '\0'; i++)
+                name[i-2] = argVector[1][i];
+            name[i-2] = '\0';
+
+            pid = getPIDfromname(jobSet, name);
+            if (!pid){
+                printf("myShell: fg %s: no such job\n", name);
+                printPrompt();
+                isBackground = false;
+                return;
+            }
+            free(name);
+        }
+        shellfgCommand( pid == -1 ? atoi (argVector[1]) : pid );
+        printPrompt();
+        isBackground = false;
+        return;
+    }
+    else
+    {
+        printf("No background jobs!\n");
+        printPrompt();
+        isBackground = false;
+        return;
+    }
+}
+
+void exec_bg()
+{
+    int pid = -1;
+
+    if (jobSet)
+    {
+        if (argVector[1][0] == '%' && argVector[1][1] == '.' && argVector[1][2] != '\0')
+        {
+            // Search by name
+            char* name = (char*) malloc (sizeof(char));
+            
+            int i;
+            for (i=2; argVector[1][i] != '\0'; i++)
+                name[i-2] = argVector[1][i];
+            name[i-2] = '\0';
+
+            pid = getPIDfromname(jobSet, name);
+            if (!pid){
+                printf("myShell: bg %s: no such job\n", name);
+                printPrompt();
+                isBackground = false;
+                return;
+            }
+            free(name);
+        }
+        shellbgCommand( pid == -1 ? atoi (argVector[1]) : pid );
+        printPrompt();
+        isBackground = false;
+        return;
+    }
+    else
+    {
+        printf("No suspended jobs!\n");
+        printPrompt();
+        isBackground = false;
+        return;
+    }
+}
+
+void count_pipes()
+{
+    int counter = 0;
+    for (int i=0; argVector[i]!=NULL; i++)
+    {
+       if (strcmp(argVector[i], "|") == 0)
+           counter ++;
+    }
+    if (counter == 0)
+        noinit_cmd = true;
+    else
+        commands = initTripleGlobalCharPtr(counter + 2, 20);
+    return;
+}
+
+int pipe_filter()
+{
+    int a = 0;
+    count_pipes();
+
+    for (int i=0; argVector[i] != NULL; i++)
+    {
+        pipeargCount ++;
+        if (strcmp(argVector[i], "|") == 0)
+        {
+            if (i > 2 && strcmp(argVector[i-2], "<") == 0)
+            {
+                if (redirection_in_pipe == 0)
+                    redirection_in_pipe = 1;
+                else
+                {
+                    printf("myShell: Multiple Indirection Operators with Pipes\n");
+                    badRedirectpipe = 1;
+                    break;
+                }
+
+            }
+
+            if (lastPipe == 0)
+            {
+                for (a=0; a<i; a++)
+                {
+                    commands[pipeCount][a] = (char*) realloc (commands[pipeCount][a], strlen(argVector[a])+1);    
+                    strcpy(commands[pipeCount][a], argVector[a]); 
+                }
+                // Make NULL terminated command
+                for(int a = i; a<20; a++)
+                    free(commands[pipeCount][a]);
+                commands[pipeCount][i] = 0;
+
+                // Update Pipe location
+                lastPipe = i;
+                pipeCount++;
+            }
+
+            else
+            {
+                for (a = lastPipe+1; a<i; a++)
+                {
+                    commands[pipeCount][a-lastPipe-1] = (char*) realloc (commands[pipeCount][a-lastPipe-1], strlen(argVector[a])+1);    
+                    strcpy(commands[pipeCount][a-lastPipe-1], argVector[a]);
+                }
+
+                // Make NULL terminated command
+                for(int a = i-lastPipe-1; a>=0 && a<20; a++)
+                    free(commands[pipeCount][a]);
+                commands[pipeCount][i-lastPipe-1] = 0;
+
+                // Update Pipe location
+                lastPipe = i;
+                pipeCount++;
+           }
+       }
+    }
+    return a;
+}
+
+void output_redirection(int a)
+{
+    for(a=lastPipe + 1; argVector[a]!=NULL; a++)
+    {
+        if (strcmp(argVector[a], "|") != 0)
+        {
+            commands[pipeCount][a-lastPipe-1] = (char*) realloc (commands[pipeCount][a-lastPipe-1], strlen(argVector[a])+1);    
+            strcpy(commands[pipeCount][a-lastPipe-1], argVector[a]);
+        }
+    }
+    for(int b=a-lastPipe-1; b<20; b++)
+        free(commands[pipeCount][b]);
+    commands[pipeCount][a-lastPipe-1] = 0;
+
+    // Now, I must have a NULL terminated array of Commands
+    for(int b=0; b<20; b++)
+        free(commands[pipeCount+1][b]);
+    free(commands[pipeCount+1]);
+    commands[pipeCount+1][a] = 0;
+    commands[pipeCount+1] = 0;
+
+    if (pipeargCount >= 2 && (strcmp(argVector[pipeargCount-2], ">") == 0 || strcmp(argVector[pipeargCount-2], ">>") == 0))
+    {
+        // a | b > c
+        if (redirection_out_pipe == 0)
+            redirection_out_pipe = 1;
+        else
+        {
+            printf("myShell: Multiple Outdirection Operators with Pipes");
+            badRedirectpipe = 1;
+            return;
+        }
+    }
+
+    executePipe(commands);
+    printPrompt();
+    return;
+}
+
+bool redirection_with_pipes_and_ipc()
+{
+    for (int i=0; argVector[i]!=NULL; i++)
+    {
+        if (strcmp(argVector[i], ">") == 0 || strcmp(argVector[i], ">>") == 0)
+        {
+            redirectcmd1 = (char**) calloc (50, sizeof(char*));
+            redirectcmd2 = (char**) calloc (50, sizeof(char*));
+            for (int i=0; i<5; i++)
+            {
+                redirectcmd1[i] = (char*) malloc (sizeof(char));
+                redirectcmd2[i] = (char*) malloc (sizeof(char));
+            }
+            if (i <= lastPipe)
+            {
+                printf("myShell: Output Redirection before a pipe\n");
+                redirect = true;
+                return false;
+            }
+            
+            for(int j = (lastPipe>0) ? lastPipe+1 : 0; j<i; j++)
+            {
+                if (lastPipe > 0)
+                    strcpy(redirectcmd1[j-lastPipe-1], argVector[j]); 
+                else
+                    strcpy(redirectcmd1[j], argVector[j]);
+            }
+            if (lastPipe > 0)
+            {
+                redirectcmd1[i-lastPipe-1] = 0; 
+            }
+            else
+                redirectcmd1[i] = 0;
+            int j;
+            for(j = i+1; argVector[j]!=NULL; j++)
+            {
+                strcpy(redirectcmd2[j-i-1], argVector[j]);
+            }
+            redirectcmd2[j-i-1] = 0;
+            if (strcmp(argVector[i], ">") == 0)
+                execRedirect(0);
+            else
+                execRedirect(2);
+            for(int a=0; a<5; a++)
+            {
+                free(redirectcmd1[a]);
+                free(redirectcmd2[a]);
+            }
+            free(redirectcmd1);
+            free(redirectcmd2);
+            redirect = true;
+            return false;
+        }
+        
+        else if (strcmp(argVector[i], "<") == 0)
+        {
+            redirectcmd1 = (char**) calloc (50, sizeof(char*));
+            redirectcmd2 = (char**) calloc (50, sizeof(char*));
+            for (int i=0; i<5; i++)
+            {
+                redirectcmd1[i] = (char*) malloc (sizeof(char));
+                redirectcmd2[i] = (char*) malloc (sizeof(char));
+            }
+            for(int j = 0; j<i; j++)
+            {
+                strcpy(redirectcmd1[j], argVector[j]); 
+            }
+            redirectcmd1[i] = 0; 
+            int j;
+            for(j = i+1; argVector[j]!=NULL; j++)
+            {
+                strcpy(redirectcmd2[j-i-1], argVector[j]);
+            }
+            redirectcmd2[j-i-1] = 0;
+            execRedirect(1);
+            for(int a=0; a<5; a++)
+            {
+                free(redirectcmd1[a]);
+                free(redirectcmd2[a]);
+            }
+            free(redirectcmd1);
+            free(redirectcmd2);
+            redirect = true;
+            return false;
+        }
+
+        // As of now, there's no support for Msg Queues with Pipes / Redirection
+        else if (strcmp(argVector[i], "##") == 0)
+        {
+            msgOutputs = initTripleGlobalCharPtr(20, 5);
+            int* array = (int*) malloc (sizeof(int));
+            command = initDoubleGlobalCharPtr(i+1);
+            for(int j=0; j<i; j++)
+            {
+                strcpy(command[j], argVector[j]);
+            }
+            free(command[i]);
+            command[i] = NULL;
+
+            int k=0;
+            int l = 0;
+
+            for(int j=i+1; argVector[j]!=NULL; j++)
+            {
+                if (strcmp(argVector[j], ",") == 0)
+                {
+                    msgOutputs[k][l++] = 0;
+                    array[k] = l;
+                    k++;
+                    l = 0;
+                }
+                else{
+                    strcpy(msgOutputs[k][l++], argVector[j]);
+                    if (argVector[j+1] == NULL)
+                    {
+                        msgOutputs[k][l] = 0;
+                        if (l < 5)
+                            for(int q=l;q<5;q++)
+                                free(msgOutputs[k][q]);
+                    } 
+                }
+                array[k] = l-1;
+            }
+            for(int q=k+1; q<20; q++)
+            {
+                for(int r=0; r<5;r++)
+                    free(msgOutputs[q][r]);
+                free(msgOutputs[q]);
+            }
+            msgOutputs[k+1] = 0;
+            shellMsgQ(msgOutputs);
+            for(int p=0; p<=k; p++)
+            {
+                for(int q=0; q<array[p]; q++)
+                {
+                    free(msgOutputs[p][q]);
+                }
+                free(msgOutputs[p]);
+            }
+            free(msgOutputs);
+            free(array);
+            freeDoubleGlobalCharPtr(&command, i+1);
+            return true;
+        }
+        
+        else if (strcmp(argVector[i], "SS") == 0)
+        {
+            shmOutputs = initTripleGlobalCharPtr(20, 5);
+            int* array = (int*) malloc (sizeof(int));
+            command = initDoubleGlobalCharPtr(i+1);
+            for(int j=0; j<i; j++)
+            {
+                strcpy(command[j], argVector[j]);
+            }
+            free(command[i]);
+            command[i] = NULL;
+
+            int k=0;
+            int l = 0;
+
+            for(int j=i+1; argVector[j]!=NULL; j++)
+            {
+                if (strcmp(argVector[j], ",") == 0)
+                {
+                    shmOutputs[k][l++] = 0;
+                    array[k] = l;
+                    k++;
+                    l = 0;
+                }
+                else{
+                    strcpy(shmOutputs[k][l++], argVector[j]);
+                    if (argVector[j+1] == NULL)
+                    {
+                        shmOutputs[k][l] = 0;
+                        if (l < 5)
+                            for(int q=l;q<5;q++)
+                                free(shmOutputs[k][q]);
+                    }
+                }
+                array[k] = l;
+            }
+            for(int q=k+1; q<20; q++)
+            {
+                for(int r=0; r<5;r++)
+                    free(shmOutputs[q][r]);
+                free(shmOutputs[q]);
+            }
+            shmOutputs[k+1] = 0;
+            shellShm(shmOutputs);
+            for(int p=0; p<=k; p++)
+            {
+                for(int q=0; q<array[p]; q++)
+                {
+                    free(shmOutputs[p][q]);
+                }
+                free(shmOutputs[p]);
+            }
+            free(shmOutputs);
+            free(array);
+            freeDoubleGlobalCharPtr(&command, i+1);
+            return true;
+        }
+    }
+    return false;
+}
+
+void insert_backgrond_job(pid_t pid)
+{
+    Node node;
+    node.pid = pid;
+    node.status = STATUS_BACKGROUND;
+    node.gid = pid;
+    char name[255];
+    strcpy(name, argVector[0]);
+    node.name = name;
+    jobSet = insert(jobSet, node);
+    setpgrp();
+    int status;
+    if (waitpid (pid, &status, WNOHANG) > 0)
+        printf("[bg]  %d finished\n", pid);
+}
+
+void job_wait(pid_t pid)
+{
+    int status;
+    waitpid(pid, &status, WUNTRACED);
+    if (WSTOPSIG(status)) {
+        setpgid(pid, pid);
+        char* name = (char*) malloc (sizeof(char));
+        strcpy(name, argVector[0]);
+        Node node = { pid, name, STATUS_SUSPENDED, getpgrp() };
+        jobSet = insert(jobSet, node);
+        printf("suspended  %s %d\n", node.name, node.pid);
+        signal(SIGTTOU, SIG_IGN);
+        tcsetpgrp(0, getpid());
+        signal(SIGTTOU, SIG_DFL);
+    }
+}
+
+void execute_child(sigset_t set, int pathLength)
+{
+    // The child must receive the previously blocked signals
+    sigprocmask(SIG_UNBLOCK, &set, NULL);
+    signal(SIGINT, SIG_DFL);
+    signal(SIGQUIT, SIG_DFL);
+    signal(SIGTSTP, SIG_DFL);
+    signal(SIGTTIN, SIG_DFL);
+    signal(SIGTTOU, SIG_DFL);
+    signal(SIGCHLD, SIG_DFL);
+
+    if (isBackground == true)
+    {
+        printf("[bg]  %d\n",getpid());
+        setpgid(0, 0);
+    }
+
+    else 
+    {
+        // Add to foreground process group
+        pid_t cgrp = getpgrp();
+        tcsetpgrp(STDIN_FILENO, cgrp);
+        setpgid(getpgrp(), getppid());
+    }
+
+    childPID = getpid();
+    int curr = 0;
+    
+    if (ignorePATH == false)
+    {
+        while (curr < pathLength)
+        {
+            if (execv(str_concat(PATH[curr], argVector[0]), argVector) < 0)
+            {
+                curr ++;
+                if (curr == pathLength)
+                {
+                    perror("Error");
+                    exit(0);
+                }
+            }
+        }
+    
+    }
+
+    else
+    {
+        ignorePATH = false;
+        char s[100];
+        if ( execv(str_concat(getcwd(s, 100), argVector[0]), argVector) < 0 )
+        {
+            perror("Error");
+            exit(0);
+        }
+    }
+}
+
+void initStuff(char* name)
+{
+    // Initialize jobSet and set $USER and $HOME variables for our Shell
 	jobSet = (Job*) malloc (sizeof(Job));
-	Node jnode;
+    Node jnode;
 	jnode.pid = getpid();
     jnode.name = (char*) calloc (150, sizeof(char));
-    strcpy(jnode.name, argv[0]);
+    strcpy(jnode.name, name);
 	jnode.status = STATUS_FOREGROUND;
     jnode.gid = getpid();
     jobSet->node = jnode;
 	jobSet->next = NULL;
+    USER = getenv("USER");
+    HOME = getenv("HOME");
+    HOST = (char*) malloc (100 * sizeof(char));
+    HOME_LEN = strlen(HOME);
+}
 
-	int signalArray[] = {SIGINT, SIGKILL, SIGTSTP, -1};
-	sigset_t set = createSignalSet(signalArray);
-	struct sigaction sa = {0};
-	sa.sa_sigaction = shellHandler;
-	sa.sa_flags = SA_SIGINFO;
+int main(int argc, char* argv[])
+{
+    #ifdef DEBUG
+    if (argc > 1) {
+        printf("Fatal : Must invoke without extra arguments\n");
+        exit(EXIT_FAILURE);
+    }
+    #endif
+	
+	uint32_t pathLength = setPATH(".myshellrc");
+    char* buffer = NULL;
+    int count;
+    current_directory = (char*) calloc (100, sizeof(char));
+    
+    initStuff(argv[0]);
+    int signalArray[] = {SIGINT, SIGKILL, SIGTSTP, -1};
+    sigset_t set = createSignalSet(signalArray);
 
 	sigprocmask(SIG_BLOCK, &set, NULL);
 
-    USER= (char*) calloc (30, sizeof(char));
-    HOME = (char*) calloc (40, sizeof(char));
-    USER = getenv("USER");
-    HOME = getenv("HOME");
-    HOME_LEN = strlen(HOME);
-
-	printPrompt();
+    // We need to find the Current Directory before printing the prompt
+    char* s = (char*) malloc (100*sizeof(char));
+    replaceSubstring(getcwd(s, 100));
+    free(s);
+	
+    printPrompt();
 
 	// Now start the event loop
-	while((buffer = lineget()))
+	while((buffer = lineget(buffer)))
     {
+        argLength = getArgumentLength(buffer);
+        argVector= (char**) malloc ((argLength + 1)* sizeof(char*));
+        for (int i=0; i <= argLength; i++)
+            argVector[i] = (char*) malloc (sizeof(char));
+
         redirection_in_pipe = 0;
         redirection_out_pipe = 0;
+        pipeCount = 0;
+        pipeargCount = 0;
+        bgcount = -1;
         for (uint32_t i=0; buffer[i] != '\0'; i++)
 			if (buffer[i] == '\n')
 				buffer[i] = '\0';
@@ -969,7 +1533,6 @@ int main(int argc, char* argv[])
         {
             if (curr->node.status == STATUS_BACKGROUND && waitpid(curr->node.pid, NULL, WNOHANG))
             {   // Background Job has returned
-                //printf("[bg]  %d finished\n", curr->node.pid);
                 jobSet = removeJob(jobSet, curr->node.pid);
                 curr = jobSet;
             }
@@ -978,508 +1541,100 @@ int main(int argc, char* argv[])
 
 		if (strcmp(buffer, "exit") == 0)
 		{
-			freePATH();
-            freeJobs(jobSet);
+            destroyGlobals();
             free(jobSet);
+            free(buffer);
+            freeArgVector();
+            free(HOST);
 			exit(0);
 		}
 
 		if (strcmp(buffer, "printlist") == 0)
         {
 			printList(jobSet);
+            freeArgVector();
 			printPrompt();
 			continue;
 		}
 
 		else
-		{
-			argLength = getArgumentLength(buffer);
-			argVector = (char**) malloc ((argLength+1)* sizeof(char*));
-			for (uint32_t i=0; i <= argLength; i++)
-				argVector[i] = (char*) calloc (100, sizeof(char));
-
-			int count = 0;
-			int j = 0;
-			for (uint32_t i=0; buffer[i] != '\0'; i++)
-			{
-				if (buffer[i] == ' ' && buffer[i+1] == ' ')
-				{
-                    continue;
-                }
-                else if (buffer[i] == ' ')
-                {
-                    argVector[count][j++] = '\0';
-                    count++;
-                    j = 0;
-                }
-                else
-                {
-                    argVector[count][j] = buffer[i];
-                    j++;
-                }
-			}
-
-			argVector[count][j] = '\0';
-			argVector[count + 1] = 0;
+        {
+            count = initArgs(buffer);
             
             if (builtin(argVector) == 1)
             {
+                freeArgVector();
                 printPrompt();
                 continue;
             }
 
-
 			if (strcmp(argVector[count], "&") == 0)
 			{
 				isBackground = true;
+                bgcount = count;
+                for(int i=count; i<argLength; i++)
+                    free(argVector[i]);
 				argVector[count] = 0;
 			}
 
             if (strcmp(argVector[0], "fg") == 0)
             {
-                int pid = -1;
-
-                if (jobSet)
-                {
-                    if (argVector[1][0] == '%' && argVector[1][1] == '.' && argVector[1][2] != '\0')
-                    {
-                        // Search by name
-                        char* name = (char*) malloc (sizeof(char));
-                        
-                        int i;
-                        for (i=2; argVector[1][i] != '\0'; i++)
-                            name[i-2] = argVector[1][i];
-                        name[i-2] = '\0';
-
-                        pid = getPIDfromname(jobSet, name);
-                        if (!pid){
-                            printf("myShell: fg %s: no such job\n", name);
-                            printPrompt();
-                            isBackground = false;
-                            continue;
-                        }
-                        free(name);
-                    }
-                    shellfgCommand( pid == -1 ? atoi (argVector[1]) : pid );
-                    freeArgVector(argLength, argVector);
-                    printPrompt();
-                    isBackground = false;
-                    continue;
-                }
-                else
-                {
-                    printf("No background jobs!\n");
-                    freeArgVector(argLength, argVector);
-                    printPrompt();
-                    isBackground = false;
-                    continue;
-                }
+                exec_fg();
+                freeArgVector();
+                continue;
             }
 
             if (strcmp(argVector[0], "bg") == 0)
             {
-                int pid = -1;
-
-                if (jobSet)
-                {
-                    if (argVector[1][0] == '%' && argVector[1][1] == '.' && argVector[1][2] != '\0')
-                    {
-                        // Search by name
-                        char* name = (char*) malloc (sizeof(char));
-                        
-                        int i;
-                        for (i=2; argVector[1][i] != '\0'; i++)
-                            name[i-2] = argVector[1][i];
-                        name[i-2] = '\0';
-
-                        pid = getPIDfromname(jobSet, name);
-                        if (!pid){
-                            printf("myShell: bg %s: no such job\n", name);
-                            printPrompt();
-                            isBackground = false;
-                            continue;
-                        }
-                        free(name);
-                    }
-                    shellbgCommand( pid == -1 ? atoi (argVector[1]) : pid );
-                    freeArgVector(argLength, argVector);
-                    printPrompt();
-                    isBackground = false;
-                    continue;
-                }
-                else
-                {
-                    printf("No suspended jobs!\n");
-                    freeArgVector(argLength, argVector);
-                    printPrompt();
-                    isBackground = false;
-                    continue;
-                }
+                exec_bg();
+                freeArgVector();
+                continue;
             }
 		
-            char*** commands;
-            int a = 0;
-            int lastPipe = 0;
-            int badRedirectpipe = 0;
-            int argCount = 0;
-            
-            commands = (char***) calloc (20, sizeof(char**));
-            for (int i=0; i<20; i++)
-            {
-                commands[i] = (char**) calloc (20, sizeof(char*));
-                for (int j=0; j<20; j++)
-                {
-                    commands[i][j] = (char*) malloc (sizeof(char));
-                }
-            }
-
-            for (int i=0; argVector[i] != NULL; i++)
-            {
-                argCount ++;
-                if (strcmp(argVector[i], "|") == 0)
-                {
-                    if (i > 2 && strcmp(argVector[i-2], "<") == 0)
-                    {
-                        if (redirection_in_pipe == 0)
-                            redirection_in_pipe = 1;
-                        else
-                        {
-                            printf("myShell: Multiple Indirection Operators with Pipes\n");
-                            badRedirectpipe = 1;
-                            break;
-                        }
-
-                    }
-
-                    if (lastPipe == 0)
-                    {
-                        for (a=0; a<i; a++)
-                        {
-                            commands[pipeCount][a] = (char*) realloc (commands[pipeCount][a], strlen(argVector[a])+1);    
-                            strcpy(commands[pipeCount][a], argVector[a]); 
-                        }
-                        // Make NULL terminated command
-                        commands[pipeCount][i] = 0;
-
-                        // Update Pipe location
-                        lastPipe = i;
-                        pipeCount++;
-                    }
-
-                    else
-                    {
-                        for (a = lastPipe+1; a<i; a++)
-                        {
-                            commands[pipeCount][a-lastPipe-1] = (char*) realloc (commands[pipeCount][a-lastPipe-1], strlen(argVector[a])+1);    
-                            strcpy(commands[pipeCount][a-lastPipe-1], argVector[a]);
-                        }
-
-                        // Make NULL terminated command
-                        commands[pipeCount][i-lastPipe-1] = 0;
-
-                        // Update Pipe location
-                        lastPipe = i;
-                        pipeCount++;
-                   }
-
-               }
-            }
+            int a = pipe_filter();
 
             if (badRedirectpipe == 1)
             {
+                freeArgVector();
                 printPrompt();
+                if (noinit_cmd == false)
+                    freeTripleGlobalCharPtr(&commands, pipeCount+2, 20);
+                noinit_cmd = false;
+                lastPipe = 0;
                 continue;
             }
             
             if (pipeCount > 0)
             {
-                for(a=lastPipe + 1; argVector[a]!=NULL; a++)
-                {
-                    if (strcmp(argVector[a], "|") != 0)
-                    {
-                        commands[pipeCount][a-lastPipe-1] = (char*) realloc (commands[pipeCount][a-lastPipe-1], strlen(argVector[a])+1);    
-                        strcpy(commands[pipeCount][a-lastPipe-1], argVector[a]);
-                    }
-                }
-                commands[pipeCount][a-lastPipe-1] = 0;
-
-                // Now, I must have a NULL terminated array of Commands
-                commands[pipeCount+1][a] = 0;
-                commands[pipeCount+1] = 0;
-            }
-
-            if (pipeCount > 0)
-            {
-                if (argCount >= 2 && (strcmp(argVector[argCount-2], ">") == 0 || strcmp(argVector[argCount-2], ">>") == 0))
-                {
-                    // a | b > c
-                    if (redirection_out_pipe == 0)
-                        redirection_out_pipe = 1;
-                    else
-                    {
-                        printf("myShell: Multiple Outdirection Operators with Pipes");
-                        badRedirectpipe = 1;
-                        break;
-                    }
-                }
-            }
-
-
-            if (pipeCount > 0)
-            {
-                executePipe(commands);
-                printPrompt();
-                for(int i=0; i<20; i++)
-                {
-                    free(commands[i]);
-                }
-                free(commands);
-                freeArgVector(argLength, argVector);
+                output_redirection(a);
+                freeArgVector();
+                if (noinit_cmd == false)
+                    freeTripleGlobalCharPtr(&commands, pipeCount+2, 20);
+                noinit_cmd = false;
+                lastPipe = 0;
                 continue;
             }
             
+            bool result = redirection_with_pipes_and_ipc(redirectcmd1, redirectcmd2);
 
-            int redirect = 0;
-
-            char** redirectcmd1 = (char**) calloc (5, sizeof(char*));
-            char** redirectcmd2 = (char**) calloc (5, sizeof(char*));
-            for (int i=0; i<5; i++)
+            if (result == true || redirect == true)
             {
-                redirectcmd1[i] = (char*) malloc (sizeof(char));
-                redirectcmd2[i] = (char*) malloc (sizeof(char));
-            }
-
-            for (int i=0; argVector[i]!=NULL; i++)
-            {
-                if (strcmp(argVector[i], ">") == 0 || strcmp(argVector[i], ">>") == 0)
-                {
-                    if (i <= lastPipe)
-                    {
-                        printf("myShell: Output Redirection before a pipe\n");
-                        redirect = 1;
-                        break;
-                    }
-                    
-                    for(int j = (lastPipe>0) ? lastPipe+1 : 0; j<i; j++)
-                    {
-                        if (lastPipe > 0)
-                            strcpy(redirectcmd1[j-lastPipe-1], argVector[j]); 
-                        else
-                            strcpy(redirectcmd1[j], argVector[j]);
-                    }
-                    if (lastPipe > 0)
-                        redirectcmd1[i-lastPipe-1] = 0; 
-                    else
-                        redirectcmd1[i] = 0;
-                    int j;
-                    for(j = i+1; argVector[j]!=NULL; j++)
-                    {
-                        strcpy(redirectcmd2[j-i-1], argVector[j]);
-                    }
-                    redirectcmd2[j-i-1] = 0;
-                    if (strcmp(argVector[i], ">") == 0)
-                        execRedirect(redirectcmd1, redirectcmd2, 0);
-                    else
-                        execRedirect(redirectcmd1, redirectcmd2, 2);
-                    redirect = 1;
-                    break;
-                }
-                
-                else if (strcmp(argVector[i], "<") == 0)
-                {
-                    for(int j = 0; j<i; j++)
-                    {
-                        strcpy(redirectcmd1[j], argVector[j]); 
-                    }
-                    redirectcmd1[i] = 0; 
-                    int j;
-                    for(j = i+1; argVector[j]!=NULL; j++)
-                    {
-                        strcpy(redirectcmd2[j-i-1], argVector[j]);
-                    }
-                    redirectcmd2[j-i-1] = 0;
-                    execRedirect(redirectcmd1, redirectcmd2, 1);
-                    redirect = 1;
-                    break;
-                }
-
-                // As of now, there's no support for Msg Queues with Pipes / Redirection
-                else if (strcmp(argVector[i], "##") == 0)
-                {
-                    command = (char**) malloc (20 * sizeof(char*));
-                    for (int j=0; j<20; j++)
-                        command[j] = (char*) malloc (sizeof(char));
-                    
-                    msgOutputs = (char***) malloc (20 * sizeof(char**));
-                    for (int j=0; j<20; j++)
-                    {
-                        msgOutputs[j] = (char**) malloc (5 * sizeof(char*));
-                        for(int k=0; k<5; k++)
-                            msgOutputs[j][k] = (char*) malloc (sizeof(char));
-                    }
-
-                    for(int j=0; j<i; j++)
-                    {
-                        strcpy(command[j], argVector[j]);
-                    }
-                    command[i] = NULL;
-
-                    int k=0;
-                    int l = 0;
-
-                    for(int j=i+1; argVector[j]!=NULL; j++)
-                    {
-                        if (strcmp(argVector[j], ",") == 0)
-                        {
-                            msgOutputs[k][l++] = 0;
-                            k++;
-                            l = 0;
-                        }
-                        else{
-                            strcpy(msgOutputs[k][l++], argVector[j]);
-                            if (argVector[j+1] == NULL)
-                                msgOutputs[k][l] = 0;
-                        }
-                    }
-                    msgOutputs[k+1] = 0;
-                    msgqueue = 1;
-                }
-                
-                else if (strcmp(argVector[i], "SS") == 0)
-                {
-                    command = (char**) malloc (20 * sizeof(char*));
-                    for (int j=0; j<20; j++)
-                        command[j] = (char*) malloc (sizeof(char));
-                    
-                    shmOutputs = (char***) malloc (20 * sizeof(char**));
-                    for (int j=0; j<20; j++)
-                    {
-                        shmOutputs[j] = (char**) malloc (5 * sizeof(char*));
-                        for(int k=0; k<5; k++)
-                            shmOutputs[j][k] = (char*) malloc (sizeof(char));
-                    }
-
-                    for(int j=0; j<i; j++)
-                    {
-                        strcpy(command[j], argVector[j]);
-                    }
-                    command[i] = NULL;
-
-                    int k=0;
-                    int l = 0;
-
-                    for(int j=i+1; argVector[j]!=NULL; j++)
-                    {
-                        if (strcmp(argVector[j], ",") == 0)
-                        {
-                            shmOutputs[k][l++] = 0;
-                            k++;
-                            l = 0;
-                        }
-                        else{
-                            strcpy(shmOutputs[k][l++], argVector[j]);
-                            if (argVector[j+1] == NULL)
-                                shmOutputs[k][l] = 0;
-                        }
-                    }
-                    shmOutputs[k+1] = 0;
-                    shmemory = 1;
-                }
-            }
-
-            if ( msgqueue == 1 )
-            {
-                msgqueue = 0;
-                shellMsgQ(command, msgOutputs);
+                redirect = false;
+                freeArgVector();
                 printPrompt();
-                continue;
-            }
-
-            if ( shmemory == 1 )
-            {
-                shmemory = 0;
-                shellShm(command, shmOutputs);
-                printPrompt();
-                continue;
-            }
-
-            if ( redirect == 1 )
-            {
-                for (int i=0; i<5; i++)
-                {
-                    free(redirectcmd1[i]);
-                    free(redirectcmd2[i]);
-                }
-                free(redirectcmd1);
-                free(redirectcmd2);
-                printPrompt();
+                if (noinit_cmd == false)
+                    freeTripleGlobalCharPtr(&commands, pipeCount+2, 20);
+                noinit_cmd = false;
+                lastPipe = 0;
                 continue;
             }
 
             int pid = fork();
             childPID = pid;
-            //sigaction(SIGCHLD, &sa, NULL);
 
 			if (pid == 0)
 			{
-				// The child must receive the previously blocked signals
-                sigprocmask(SIG_UNBLOCK, &set, NULL);
-                signal(SIGINT, SIG_DFL);
-                signal(SIGQUIT, SIG_DFL);
-                signal(SIGTSTP, SIG_DFL);
-                signal(SIGTTIN, SIG_DFL);
-                signal(SIGTTOU, SIG_DFL);
-                signal(SIGCHLD, SIG_DFL);
-
-				if (isBackground == true)
-				{
-					printf("[bg]  %d\n",getpid());
-                    setpgid(0, 0);
-				}
-
-				else 
-				{
-					// Add to foreground process group
-					pid_t cgrp = getpgrp();
-					// Problem with below line
-                    signal(SIGTTOU, SIG_IGN);
-                    tcsetpgrp(STDIN_FILENO, cgrp);
-                    signal(SIGTTOU, SIG_DFL);
-                    setpgid(getpgrp(), getppid());
-				}
-
-                childPID = getpid();
-                int curr = 0;
-                
-                if (ignorePATH == false)
-                {
-                    while (curr < pathLength)
-                    {
-                        if (execv(str_concat(PATH[curr], argVector[0]), argVector) < 0)
-                        {
-                            curr ++;
-                            if (curr == pathLength)
-                            {
-                                perror("Error");
-                                freeArgVector(argLength, argVector);
-                                exit(0);
-                            }
-                        }
-                    }
-                
-                }
-
-                else
-                {
-                    ignorePATH = false;
-                    char s[100];
-                    if ( execv(str_concat(getcwd(s, 100), argVector[0]), argVector) < 0 )
-                    {
-                        perror("Error");
-                        freeArgVector(argLength, argVector);
-                        exit(0);
-                    }
-                }
+                execute_child(set, pathLength);
 			}
 
 			else
@@ -1488,50 +1643,21 @@ int main(int argc, char* argv[])
 				parentPID = getpid();
                 setpgid(0, 0);
                 if (isBackground)
-                {
-                    Node node;
-                    node.pid = pid;
-                    node.status = STATUS_BACKGROUND;
-                    node.gid = pid;
-                    char* name = (char*) malloc (sizeof(char));
-                    strcpy(name, argVector[0]);
-                    node.name = name;
-                    jobSet = insert(jobSet, node);
-                    setpgrp();
-                    //tcsetpgrp(STDIN_FILENO, getpgrp());
-                    int status;
-                    if (waitpid (pid, &status, WNOHANG) > 0)
-                        printf("[bg]  %d finished\n", pid);
-                }
-
+                    insert_backgrond_job(pid);
                 else
-                {
-                    int status;
-                    //if(waitpid(-1, &status, WSTOPPED | WCONTINUED) >= 0){
-                    waitpid(pid, &status, WUNTRACED);
-                    if (WSTOPSIG(status)) {
-                            setpgid(pid, pid);
-                            char* name = (char*) malloc (sizeof(char));
-                            strcpy(name, argVector[0]);
-                            Node node = { pid, name, STATUS_SUSPENDED, getpgrp() };
-                            jobSet = insert(jobSet, node);
-                            printf("suspended  %s %d\n", node.name, node.pid);
-                            signal(SIGTTOU, SIG_IGN);
-                            tcsetpgrp(0, getpid());
-                            signal(SIGTTOU, SIG_DFL);
-                    }
+                    job_wait(pid);
 
-                    //waitpid(pid, NULL, WUNTRACED);
+                if (isBackground) {
+                    for(int i=0; bgcount>=0 && i<bgcount; i++)
+                        free(argVector[i]);
+                    free(argVector);
                 }
+                else
+                    freeArgVector();
                 isBackground = false;
+                noinit_cmd = false;
+                lastPipe = 0;
 				printPrompt();
-                for (int i=0; i<5; i++)
-                {
-                    free(redirectcmd1[i]);
-                    free(redirectcmd2[i]);
-                }
-                free(redirectcmd1);
-                free(redirectcmd2);
 			}
 		}
 	}	
