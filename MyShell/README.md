@@ -20,6 +20,15 @@ This is a simple UNIX Shell made from scratch as part of a Systems programming e
 * Allows the user to add any directory to the `.myshellrc` configuration file to add to the local `PATH` variable for the Shell. The Shell looks into all these directories one by one, and tries executing each line until there is a success. Otherwise, a suitable error message is printed.
 * Can execute `filename` having suitable execute permissions in the current working directory using `./filename`. (Dot Slash commands)
 * Foreground and Background Job Control using `fg` and `bg` commands.
+
+Usage (Both fg and bg):
+```
+$ fg 1000
+
+$ fg %python
+
+```
+
 * Pipe `|` Operator for redirecting commands to another command.
 * Redirection `>`, `>>` and `<` Operators for input / output redirection from / to a file respectively.
 * Support for System V Message Queues using `##` operator. This passes the output of an input command via Message Queues, which then pipes it to other commands.
@@ -27,7 +36,6 @@ This is a simple UNIX Shell made from scratch as part of a Systems programming e
 
 ## TODO
 * Add some more builtin commands.
-* Refactor Code.
 * Have implemented a basic AutoComplete Engine using Tries. Incorporate it into the Shell, possibly with the help of the `ncurses` library.
 
 ## Bugs
