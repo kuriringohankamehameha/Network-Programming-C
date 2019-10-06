@@ -949,6 +949,8 @@ char* lineget(char* buffer) {
 
 int initArgs(char* buffer)
 {
+    // Gets the argument length and copies all arguments as a list
+    // to the argument vector
     int count = 0;
     int j = 0;
     for (uint32_t i=0; buffer[i] != '\0'; i++)
@@ -1072,6 +1074,8 @@ void count_pipes()
 int pipe_filter()
 {
     int a = 0;
+
+    // Get the number of pipe characters
     count_pipes();
 
     for (int i=0; argVector[i] != NULL; i++)
@@ -1133,6 +1137,7 @@ int pipe_filter()
 
 void output_redirection(int a)
 {
+    // Execute the Pipe sequence after suitable redirection
     for(a=lastPipe + 1; argVector[a]!=NULL; a++)
     {
         if (strcmp(argVector[a], "|") != 0)
@@ -1422,6 +1427,7 @@ void execute_child(sigset_t set, int pathLength)
 
     if (isBackground == true)
     {
+        // Make the process have it's own group id
         printf("[bg]  %d\n",getpid());
         setpgid(0, 0);
     }
@@ -1441,6 +1447,7 @@ void execute_child(sigset_t set, int pathLength)
     {
         while (curr < pathLength)
         {
+            // Keep going through the PATH until we can execute one program
             if (execv(str_concat(PATH[curr], argVector[0]), argVector) < 0)
             {
                 curr ++;
@@ -1468,7 +1475,7 @@ void execute_child(sigset_t set, int pathLength)
 
 void initStuff(char* name)
 {
-    // Initialize jobSet and set $USER and $HOME variables for our Shell
+    // Initialise jobSet
 	jobSet = (Job*) malloc (sizeof(Job));
     Node jnode;
 	jnode.pid = getpid();
@@ -1478,6 +1485,8 @@ void initStuff(char* name)
     jnode.gid = getpid();
     jobSet->node = jnode;
 	jobSet->next = NULL;
+
+    // Get some Environment Variables for pretty prompt
     USER = getenv("USER");
     HOME = getenv("HOME");
     HOST = (char*) malloc (100 * sizeof(char));
@@ -1493,15 +1502,22 @@ int main(int argc, char* argv[])
     }
     #endif
 	
+    // Get the length of the config file for search and execute
 	uint32_t pathLength = setPATH(".myshellrc");
     char* buffer = NULL;
     int count;
     current_directory = (char*) calloc (100, sizeof(char));
     
+    // Initialise stuff ...
     initStuff(argv[0]);
+
+    // Create the signal array for blocking/unblocking
+    // The main process needs to block, while the children can unblock
+    // the signals
     int signalArray[] = {SIGINT, SIGKILL, SIGTSTP, -1};
     sigset_t set = createSignalSet(signalArray);
 
+    // Apply the mask
 	sigprocmask(SIG_BLOCK, &set, NULL);
 
     // We need to find the Current Directory before printing the prompt
@@ -1514,6 +1530,7 @@ int main(int argc, char* argv[])
 	// Now start the event loop
 	while((buffer = lineget(buffer)))
     {
+        // Get the argument length
         argLength = getArgumentLength(buffer);
         argVector= (char**) malloc ((argLength + 1)* sizeof(char*));
         for (int i=0; i <= argLength; i++)
@@ -1524,6 +1541,7 @@ int main(int argc, char* argv[])
         pipeCount = 0;
         pipeargCount = 0;
         bgcount = -1;
+
         for (uint32_t i=0; buffer[i] != '\0'; i++)
 			if (buffer[i] == '\n')
 				buffer[i] = '\0';
@@ -1563,6 +1581,7 @@ int main(int argc, char* argv[])
             
             if (builtin(argVector) == 1)
             {
+                // Execute a builtin command
                 freeArgVector();
                 printPrompt();
                 continue;
@@ -1570,6 +1589,7 @@ int main(int argc, char* argv[])
 
 			if (strcmp(argVector[count], "&") == 0)
 			{
+                // Needs to be a Background process
 				isBackground = true;
                 bgcount = count;
                 for(int i=count; i<argLength; i++)
@@ -1579,6 +1599,7 @@ int main(int argc, char* argv[])
 
             if (strcmp(argVector[0], "fg") == 0)
             {
+                // fg command
                 exec_fg();
                 freeArgVector();
                 continue;
@@ -1586,6 +1607,7 @@ int main(int argc, char* argv[])
 
             if (strcmp(argVector[0], "bg") == 0)
             {
+                // bg command
                 exec_bg();
                 freeArgVector();
                 continue;
@@ -1595,6 +1617,7 @@ int main(int argc, char* argv[])
 
             if (badRedirectpipe == 1)
             {
+                // Go back to the start of the REPL
                 freeArgVector();
                 printPrompt();
                 if (noinit_cmd == false)
@@ -1633,9 +1656,7 @@ int main(int argc, char* argv[])
             childPID = pid;
 
 			if (pid == 0)
-			{
                 execute_child(set, pathLength);
-			}
 
 			else
 			{
