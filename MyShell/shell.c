@@ -94,9 +94,7 @@ Job* insert(Job* head, Node node)
 	if (temp->next != NULL)
 	{
 		while (temp->next)
-		{
 			temp = temp->next;
-		}
 	}
 
 	if (temp->node.pid != node.pid)
@@ -635,9 +633,7 @@ void executePipe(char ***cmd)
         {
             dup2(fd_in, STDIN_FILENO);
             if (*(cmd + 1) != NULL)
-            {
                 dup2(p[1], STDOUT_FILENO);
-            }
             else
             {
                 if (redirection_out_pipe == 1)
@@ -727,9 +723,7 @@ void execRedirect(int redirection)
         return;
     }
     else if (redirection == 2)
-    {
         fd = open(redirectcmd2[0], O_WRONLY | O_APPEND | O_CREAT, 0644);
-    }
 
     int pid = fork();
     int save_out = dup(STDOUT_FILENO);
@@ -774,10 +768,8 @@ void shellMsgQ(char*** outputs)
         else
             temp = str_concat(temp, command[i]);
 
-        if (command[i+1] != NULL){
+        if (command[i+1] != NULL)
             temp = str_concat(temp, " ");
-        }
-
     }
     
     if (fork() == 0)
@@ -855,9 +847,8 @@ void shellShm(char*** outputs)
         else
             temp = str_concat(temp, command[i]);
 
-        if (command[i+1] != NULL){
+        if (command[i+1] != NULL)
             temp = str_concat(temp, " ");
-        }
 
     }
     
@@ -956,9 +947,7 @@ int initArgs(char* buffer)
     for (uint32_t i=0; buffer[i] != '\0'; i++)
     {
         if (buffer[i] == ' ' && buffer[i+1] == ' ')
-        {
             continue;
-        }
         else if (buffer[i] == ' ')
         {
             argVector[count][j++] = '\0';
@@ -1203,16 +1192,12 @@ bool redirection_with_pipes_and_ipc()
                     strcpy(redirectcmd1[j], argVector[j]);
             }
             if (lastPipe > 0)
-            {
                 redirectcmd1[i-lastPipe-1] = 0; 
-            }
             else
                 redirectcmd1[i] = 0;
             int j;
             for(j = i+1; argVector[j]!=NULL; j++)
-            {
                 strcpy(redirectcmd2[j-i-1], argVector[j]);
-            }
             redirectcmd2[j-i-1] = 0;
             if (strcmp(argVector[i], ">") == 0)
                 execRedirect(0);
@@ -1239,15 +1224,11 @@ bool redirection_with_pipes_and_ipc()
                 redirectcmd2[i] = (char*) malloc (sizeof(char));
             }
             for(int j = 0; j<i; j++)
-            {
                 strcpy(redirectcmd1[j], argVector[j]); 
-            }
             redirectcmd1[i] = 0; 
             int j;
             for(j = i+1; argVector[j]!=NULL; j++)
-            {
                 strcpy(redirectcmd2[j-i-1], argVector[j]);
-            }
             redirectcmd2[j-i-1] = 0;
             execRedirect(1);
             for(int a=0; a<5; a++)
@@ -1268,9 +1249,7 @@ bool redirection_with_pipes_and_ipc()
             int* array = (int*) malloc (sizeof(int));
             command = initDoubleGlobalCharPtr(i+1);
             for(int j=0; j<i; j++)
-            {
                 strcpy(command[j], argVector[j]);
-            }
             free(command[i]);
             command[i] = NULL;
 
@@ -1309,9 +1288,7 @@ bool redirection_with_pipes_and_ipc()
             for(int p=0; p<=k; p++)
             {
                 for(int q=0; q<array[p]; q++)
-                {
                     free(msgOutputs[p][q]);
-                }
                 free(msgOutputs[p]);
             }
             free(msgOutputs);
@@ -1326,9 +1303,7 @@ bool redirection_with_pipes_and_ipc()
             int* array = (int*) malloc (sizeof(int));
             command = initDoubleGlobalCharPtr(i+1);
             for(int j=0; j<i; j++)
-            {
                 strcpy(command[j], argVector[j]);
-            }
             free(command[i]);
             command[i] = NULL;
 
@@ -1367,9 +1342,7 @@ bool redirection_with_pipes_and_ipc()
             for(int p=0; p<=k; p++)
             {
                 for(int q=0; q<array[p]; q++)
-                {
                     free(shmOutputs[p][q]);
-                }
                 free(shmOutputs[p]);
             }
             free(shmOutputs);
@@ -1383,6 +1356,7 @@ bool redirection_with_pipes_and_ipc()
 
 void insert_backgrond_job(pid_t pid)
 {
+    // Insert the background job into the jobSet and wait for completion
     Node node;
     node.pid = pid;
     node.status = STATUS_BACKGROUND;
