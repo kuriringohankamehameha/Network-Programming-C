@@ -973,15 +973,15 @@ void exec_fg()
 
     if (jobSet)
     {
-        if (argVector[1][0] == '%' && argVector[1][1] == '.' && argVector[1][2] != '\0')
+        if (argVector[1][0] == '%' && argVector[1][1] != '\0')
         {
             // Search by name
             char* name = (char*) malloc (sizeof(char));
             
             int i;
-            for (i=2; argVector[1][i] != '\0'; i++)
-                name[i-2] = argVector[1][i];
-            name[i-2] = '\0';
+            for (i=1; argVector[1][i] != '\0'; i++)
+                name[i-1] = argVector[1][i];
+            name[i-1] = '\0';
 
             pid = getPIDfromname(jobSet, name);
             if (!pid){
@@ -1012,15 +1012,15 @@ void exec_bg()
 
     if (jobSet)
     {
-        if (argVector[1][0] == '%' && argVector[1][1] == '.' && argVector[1][2] != '\0')
+        if (argVector[1][0] == '%' && argVector[1][2] != '\0')
         {
             // Search by name
             char* name = (char*) malloc (sizeof(char));
             
             int i;
-            for (i=2; argVector[1][i] != '\0'; i++)
-                name[i-2] = argVector[1][i];
-            name[i-2] = '\0';
+            for (i=1; argVector[1][i] != '\0'; i++)
+                name[i-1] = argVector[1][i];
+            name[i-1] = '\0';
 
             pid = getPIDfromname(jobSet, name);
             if (!pid){
@@ -1354,16 +1354,15 @@ bool redirection_with_pipes_and_ipc()
     return false;
 }
 
-void insert_backgrond_job(pid_t pid)
+void insert_background_job(pid_t pid)
 {
     // Insert the background job into the jobSet and wait for completion
     Node node;
     node.pid = pid;
     node.status = STATUS_BACKGROUND;
     node.gid = pid;
-    char name[255];
-    strcpy(name, argVector[0]);
-    node.name = name;
+    node.name = (char*) malloc (sizeof(char));
+    strcpy(node.name, argVector[0]);
     jobSet = insert(jobSet, node);
     setpgrp();
     int status;
@@ -1571,7 +1570,7 @@ int main(int argc, char* argv[])
 				argVector[count] = 0;
 			}
 
-            if (strcmp(argVector[0], "fg") == 0)
+            else if (strcmp(argVector[0], "fg") == 0)
             {
                 // fg command
                 exec_fg();
@@ -1579,7 +1578,7 @@ int main(int argc, char* argv[])
                 continue;
             }
 
-            if (strcmp(argVector[0], "bg") == 0)
+            else if (strcmp(argVector[0], "bg") == 0)
             {
                 // bg command
                 exec_bg();
@@ -1638,7 +1637,7 @@ int main(int argc, char* argv[])
 				parentPID = getpid();
                 setpgid(0, 0);
                 if (isBackground)
-                    insert_backgrond_job(pid);
+                    insert_background_job(pid);
                 else
                     job_wait(pid);
 
