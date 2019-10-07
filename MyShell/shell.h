@@ -4,8 +4,11 @@
 #include<string.h>
 #include<unistd.h>
 #include<sys/types.h>
+#include<sys/stat.h>
 #include<signal.h>
 #include<fcntl.h>
+#include<errno.h>
 #include<sys/msg.h>
 #include<sys/wait.h>
 #include<sys/shm.h>
+#include<syslog.h>

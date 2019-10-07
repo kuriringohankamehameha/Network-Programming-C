@@ -10,7 +10,8 @@
 #define COLOR_GREEN "\033[0;32;32m"
 #define COLOR_GRAY "\033[1;30m"
 
-#define DEBUG 1
+/* Uncomment this line to get the status of each process from the Shell */
+//#define DEBUG 1
 
 enum bool { false = 0, true = ~0 };
 enum _Status { STATUS_SUSPENDED, STATUS_BACKGROUND, STATUS_FOREGROUND };
@@ -42,6 +43,7 @@ struct _Message_t{
 
 /* Declare all Global Variables here */
 char** PATH; // PATH Variable
+uint32_t pathLength = 0;
 pid_t childPID, parentPID; // PIDs for Child and Parent Process
 bool isBackground = false; // Checks whether the child is a background process
 int bgcount = -1;
@@ -70,6 +72,7 @@ int msgqueue = 0;
 int shmemory = 0;
 char* current_directory;
 Job* jobSet; // Initialize the jobset
+bool is_daemon = false; // For daemon checking
 
 /* Declare all Functions here */
 Job* createJobs(Node node)
@@ -282,13 +285,13 @@ void printPrompt()
     gethostname(HOST, 100);
     if (current_directory != NULL)
     {
-        printf("%s%s@%s:%s%s%s > $ %s", COLOR_CYAN, USER, HOST, COLOR_RED, current_directory, COLOR_GREEN, COLOR_YELLOW);
+        printf("%s%s@%s%s | %s%s%s > $ %s", COLOR_CYAN, USER, HOST, COLOR_GRAY, COLOR_RED, current_directory, COLOR_GREEN, COLOR_YELLOW);
     }
     else
     {
-        char* s = (char*) malloc (100* sizeof(char));
-        current_directory = getcwd(s, 100);
-        printf("%s%s@%s:%s%s%s > $ %s", COLOR_CYAN, USER, HOST, COLOR_RED, current_directory, COLOR_GREEN, COLOR_YELLOW);
+        char* s = (char*) malloc (300* sizeof(char));
+        current_directory = getcwd(s, 300);
+        printf("%s%s@%s%s | %s%s%s > $ %s", COLOR_CYAN, USER, HOST, COLOR_GRAY, COLOR_RED, current_directory, COLOR_GREEN, COLOR_YELLOW);
         free(s);
     }
 }
@@ -403,7 +406,7 @@ int builtin(char** argVector)
         }
         if ( pos != -1 )
         {
-            char* op = (char*) calloc (100, sizeof(char));
+            char* op = (char*) calloc (300, sizeof(char));
             int k = 0;
             for (int i=0; argVector[1][i] != '\0'; i++)
             {
@@ -422,8 +425,8 @@ int builtin(char** argVector)
         else
             chdir(argVector[1]);
 
-        char* s = (char*) malloc (100*sizeof(char));
-        replaceSubstring(getcwd(s, 100));
+        char* s = (char*) malloc (300*sizeof(char));
+        replaceSubstring(getcwd(s, 300));
         free(s);
         
         return 1;
@@ -534,8 +537,9 @@ uint32_t getArgumentLength(char* command)
 
 void freeArgVector()
 {
-    for(int i=0; i<argLength; i++)
-        free(argVector[i]);
+    if (!ignorePATH)
+        for(int i=0; i<=argLength; i++)
+            free(argVector[i]);
     free(argVector);
 }
 
@@ -645,7 +649,11 @@ void executePipe(char ***cmd)
             }
             
             close(p[0]);
-            execvp((*cmd)[0], *cmd);
+            int curr = 0;
+            while (curr < pathLength) {
+                if (execvp(str_concat(PATH[curr], (*cmd)[0]), *cmd) < 0)
+                    curr ++;
+            }
             exit(1);
         }
         else{
@@ -712,7 +720,11 @@ void execRedirect(int redirection)
         {
             dup2(fd, STDIN_FILENO);
             close(fd);
-            execvp(redirectcmd1[0], redirectcmd1);
+            int curr = 0;
+            while (curr < pathLength) {
+                if (execvp(str_concat(PATH[curr], redirectcmd1[0]), redirectcmd1) < 0)
+                    curr++;
+            }
             fprintf(stderr, "Failed to execute %s\n", redirectcmd2[0]);
         }
         else{
@@ -732,7 +744,11 @@ void execRedirect(int redirection)
     {
         dup2(fd, STDOUT_FILENO);
         close(fd);
-        execvp(redirectcmd1[0], redirectcmd1);
+        int curr = 0;
+        while (curr < pathLength) {
+            if (execvp(str_concat(PATH[curr], redirectcmd1[0]), redirectcmd1) < 0)
+                curr++;
+        }
         fprintf(stderr, "Failed to execute %s\n", redirectcmd1[0]);
     }
     else{
@@ -903,13 +919,68 @@ void shellShm(char*** outputs)
     
 }
 
+pid_t daemonizeProcess()
+{
+    // Converts a process into a Daemon
+    pid_t pid;
+    pid_t session_id; // Session ID for the Daemon Process
+    
+    pid = fork();
+    if (pid < 0) {
+        printf("myShell: Unable to fork() to daemon process\n");
+        return -1;
+    }
+
+    else if (pid == 0) {
+        // Make sure that all log files used by the daemon can be accessed
+        umask(0);
+        session_id = setsid();
+        if (session_id < 0) {
+            printf("myShell: Failed to set the daemon session\n");
+            exit(EXIT_FAILURE);
+        }
+
+        // Close all open file descriptors
+        for (int fd = sysconf(_SC_OPEN_MAX); fd>=0; fd--)
+            close(fd);
+
+        // Open the Log file to be written by the daemon
+        char* cmd = argVector[0];
+        openlog(cmd, LOG_PID, LOG_DAEMON);
+
+        int fd0 = open("/dev/null", O_RDWR);
+        int fd1 = dup(0);
+        int fd2 = dup(0);
+
+        if (fd0 != 0 || fd1 != 1 || fd2 != 2) {
+            syslog(LOG_ERR, "Unexpected fds %d %d %d", fd0, fd1, fd2);
+            closelog();
+            exit(1);
+        }
+
+        for (;;) {
+            /* Daemon Task */
+            int curr = 0;
+            while (curr < pathLength) {
+                if (execv(str_concat(PATH[curr], argVector[0]), argVector) < 0)
+                    curr ++;
+            }
+            syslog(LOG_ERR, "Couldn't execute %s", argVector[0]);
+            break;
+        }
+        closelog();
+        exit(0);
+    }
+    return pid;
+}
+
 char* lineget(char* buffer) {
     if (buffer == NULL)
-        buffer = malloc(100);
+        buffer = malloc(300);
         
     char* line = buffer; 
     char* linep = line;
-    size_t lenmax = 100, len = lenmax;
+    size_t lenmax = 300, len = lenmax;
     int c;
 
     if(line == NULL)
@@ -952,6 +1023,10 @@ int initArgs(char* buffer)
         else if (buffer[i] == ' ')
         {
             argVector[count][j++] = '\0';
+            if (count == 0 && is_daemon == false && strcmp(argVector[0], "daemonize") == 0) {
+                count = -1;
+                is_daemon = true;
+            }
             count++;
             j = 0;
         }
@@ -963,7 +1038,7 @@ int initArgs(char* buffer)
     }
 
     argVector[count][j] = '\0';
-    free(argVector[count+1]);
+    //free(argVector[count+1]);
     argVector[count + 1] = 0;
     return count;
 }
@@ -1365,7 +1440,11 @@ void insert_background_job(pid_t pid)
     node.name = (char*) malloc (sizeof(char));
     strcpy(node.name, argVector[0]);
     jobSet = insert(jobSet, node);
+
+#ifdef DEBUG
     printStatus(pid, STATUS_BACKGROUND);
+#endif
+
     setpgrp();
     int status;
     if (waitpid (pid, &status, WNOHANG) > 0)
@@ -1382,8 +1461,10 @@ void job_wait(pid_t pid)
         strcpy(name, argVector[0]);
         Node node = { pid, name, STATUS_SUSPENDED, getpgrp() };
         jobSet = insert(jobSet, node);
-        //printStatus(pid, STATUS_SUSPENDED);
-        printf("Suspended  %s %d\n", node.name, node.pid);
+#ifdef DEBUG
+        printStatus(pid, STATUS_SUSPENDED);
+#endif
+        printf("\nSuspended  %s %d\n", node.name, node.pid);
         //signal(SIGTTOU, SIG_IGN);
         tcsetpgrp(0, getpid());
         tcsetpgrp(1, getpid());
@@ -1441,8 +1522,8 @@ void execute_child(sigset_t set, int pathLength)
     else
     {
         ignorePATH = false;
-        char s[100];
-        if ( execv(str_concat(getcwd(s, 100), argVector[0]), argVector) < 0 )
+        char s[300];
+        if ( execv(str_concat(getcwd(s, 300), argVector[0]), argVector) < 0 )
         {
             perror("Error");
             exit(0);
@@ -1472,7 +1553,7 @@ void initStuff(char* name)
 
 void printStatus(pid_t pid, Status status)
 {
-    printf("PID : %d\n", pid);
+    printf("PID : %d, ", pid);
     switch(status)
     {
         case(STATUS_BACKGROUND):
@@ -1499,10 +1580,10 @@ int main(int argc, char* argv[])
     #endif
 	
     // Get the length of the config file for search and execute
-	uint32_t pathLength = setPATH(".myshellrc");
+	pathLength = setPATH(".myshellrc");
     char* buffer = NULL;
     int count;
-    current_directory = (char*) calloc (100, sizeof(char));
+    current_directory = (char*) calloc (300, sizeof(char));
     
     // Initialise stuff ...
     initStuff(argv[0]);
@@ -1517,8 +1598,8 @@ int main(int argc, char* argv[])
 	sigprocmask(SIG_BLOCK, &set, NULL);
 
     // We need to find the Current Directory before printing the prompt
-    char* s = (char*) malloc (100*sizeof(char));
-    replaceSubstring(getcwd(s, 100));
+    char* s = (char*) malloc (300*sizeof(char));
+    replaceSubstring(getcwd(s, 300));
     free(s);
 	
     printPrompt();
@@ -1598,6 +1679,7 @@ int main(int argc, char* argv[])
                 // fg command
                 exec_fg();
                 freeArgVector();
+                printPrompt();
                 continue;
             }
 
@@ -1606,6 +1688,22 @@ int main(int argc, char* argv[])
                 // bg command
                 exec_bg();
                 freeArgVector();
+                printPrompt();
+                continue;
+            }
+
+            else if (is_daemon)
+            {
+                // Daemonize command
+                if (argVector) {
+                    int daemon_pid = daemonizeProcess();
+                    daemon_pid != 1 ? printf("Daemon started with PID = %d\n", daemon_pid) : printf("myShell: Daemon initialization failed\n") ;
+                }
+                else
+                    printf("myShell: daemonize needs atleast one command\n");
+                is_daemon = false;
+                freeArgVector();
+                printPrompt();
                 continue;
             }
 		
@@ -1631,6 +1729,7 @@ int main(int argc, char* argv[])
                     freeTripleGlobalCharPtr(&commands, pipeCount+2, 20);
                 noinit_cmd = false;
                 lastPipe = 0;
+                printPrompt();
                 continue;
             }
             
@@ -1656,16 +1755,16 @@ int main(int argc, char* argv[])
 
 			else
 			{
-                ignorePATH = false;
 				parentPID = getpid();
                 setpgid(0, 0);
                 if (isBackground) {
                     insert_background_job(pid);
                 }
                 else {
+                #ifdef DEBUG
                     printStatus(pid, STATUS_FOREGROUND);
+                #endif
                     job_wait(pid);
-                    printf("Hello\n");
                 }
 
                 if (isBackground) {
@@ -1678,6 +1777,9 @@ int main(int argc, char* argv[])
                 isBackground = false;
                 noinit_cmd = false;
                 lastPipe = 0;
+                ignorePATH = false;
+                tcsetpgrp(0, getpid());
+                tcsetpgrp(1, getpid());
 				printPrompt();
 			}
 		}
