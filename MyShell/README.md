@@ -27,11 +27,10 @@ This is a simple UNIX Shell made from scratch as part of a Systems programming e
 
 Usage (Both fg and bg):
 
-```
-$ fg 1000
+```bash
+fg 1000
 
-$ fg %python
-
+fg %python
 ```
 
 * Pipe `|` Operator for redirecting commands to another command.
@@ -40,9 +39,8 @@ $ fg %python
 
 Usage :
 
-```
+```bash
 ls | grep out > output.txt
-
 ```
 
 * Support for System V Message Queues using `##` operator. This passes the output of an input command via Message Queues, which then pipes it to other commands.
@@ -51,20 +49,18 @@ ls | grep out > output.txt
 
 Usage for `##` and `SS` :
 
-```
+```bash
 ls ## wc , sort ## Uses System V Message Queues
 
 ls SS wc , sort ## Uses Shared Memory
-
 ```
 
 * Can start daemon processes with the `daemonize` command.
 
 Usage (Executes `bash script.sh` as a daemon process) :
 
-```
+```bash
 daemonize bash script.sh
-
 ```
 
 ## TODO
