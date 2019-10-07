@@ -44,6 +44,7 @@ ls | grep out > output.txt
 ```
 
 * Support for System V Message Queues using `##` operator. This passes the output of an input command via Message Queues, which then pipes it to other commands.
+(Note : Unfortunately enough, this is the comment syntax for bash)
 
 * Support for Shared Memory Redirection using `SS` operator. This is similar to the `##` operator, but uses the system's Shared Memory for faster execution and does not have the limitation of a fixed buffer size like Message Queues.
 
