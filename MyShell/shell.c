@@ -199,6 +199,7 @@ void freeJobs(Job* jobSet)
 }
 
 void freePATH();
+void printStatus();
 
 void destroyGlobals()
 {
@@ -1364,6 +1365,7 @@ void insert_background_job(pid_t pid)
     node.name = (char*) malloc (sizeof(char));
     strcpy(node.name, argVector[0]);
     jobSet = insert(jobSet, node);
+    printStatus(pid, STATUS_BACKGROUND);
     setpgrp();
     int status;
     if (waitpid (pid, &status, WNOHANG) > 0)
@@ -1380,10 +1382,12 @@ void job_wait(pid_t pid)
         strcpy(name, argVector[0]);
         Node node = { pid, name, STATUS_SUSPENDED, getpgrp() };
         jobSet = insert(jobSet, node);
-        printf("suspended  %s %d\n", node.name, node.pid);
-        signal(SIGTTOU, SIG_IGN);
+        //printStatus(pid, STATUS_SUSPENDED);
+        printf("Suspended  %s %d\n", node.name, node.pid);
+        //signal(SIGTTOU, SIG_IGN);
         tcsetpgrp(0, getpid());
-        signal(SIGTTOU, SIG_DFL);
+        tcsetpgrp(1, getpid());
+        //signal(SIGTTOU, SIG_DFL);
     }
 }
 
@@ -1464,6 +1468,25 @@ void initStuff(char* name)
     HOME = getenv("HOME");
     HOST = (char*) malloc (100 * sizeof(char));
     HOME_LEN = strlen(HOME);
+}
+
+void printStatus(pid_t pid, Status status)
+{
+    printf("PID : %d\n", pid);
+    switch(status)
+    {
+        case(STATUS_BACKGROUND):
+            printf("Status : STATUS_BACKGROUND\n");
+            break;
+        case(STATUS_FOREGROUND):
+            printf("Status : STATUS_FOREGROUND\n");
+            break;
+        case(STATUS_SUSPENDED):
+            printf("Status : STATUS_SUSPENDED\n");
+            break;
+        default:
+            break;
+    }
 }
 
 int main(int argc, char* argv[])
@@ -1636,10 +1659,14 @@ int main(int argc, char* argv[])
                 ignorePATH = false;
 				parentPID = getpid();
                 setpgid(0, 0);
-                if (isBackground)
+                if (isBackground) {
                     insert_background_job(pid);
-                else
+                }
+                else {
+                    printStatus(pid, STATUS_FOREGROUND);
                     job_wait(pid);
+                    printf("Hello\n");
+                }
 
                 if (isBackground) {
                     for(int i=0; bgcount>=0 && i<bgcount; i++)

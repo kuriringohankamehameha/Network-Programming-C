@@ -41,6 +41,7 @@ $ fg %python
 ## Bugs
 * Running `fg` on a backgrounded job sometimes does not resolve by name.
 * Suspend signal does not work as intended, if the background job waits for `tty` as input.
+* `&` does not allow support with pipes and redirection at present.
 * `##` Operation for piping via System V Message Queues does not presently support chaining with pipes and redirection operators.
 * `SS` Operation for piping via Shared Memory does not presently support chaining with pipes and redirection operators.
 * As of now, any command executes as expected only if there is atleast one space between any two keywords. Even if you want to get the output to multiple commands using `,`, you still need to insert a space before and after the comma.
