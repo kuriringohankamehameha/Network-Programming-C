@@ -204,6 +204,21 @@ void freeJobs(Job* jobSet)
 void freePATH();
 void printStatus();
 
+static void shellHandler(int signo, siginfo_t* info, void* context)
+{
+    if (signo == SIGCHLD)
+    {
+        Job* temp = findPID(jobSet, info->si_pid);
+        if (temp && temp->node.status == STATUS_BACKGROUND)
+        {
+            printf("[bg]  %s - %d finished\n", temp->node.name, info->si_pid);
+        }
+        //printf("[bg] %d finished\n", info->si_pid);
+        signal(SIGCHLD, SIG_DFL);
+    }
+
+}
+
 void destroyGlobals()
 {
     // Destroy all globals
@@ -1481,7 +1496,6 @@ void execute_child(sigset_t set, int pathLength)
     signal(SIGTSTP, SIG_DFL);
     signal(SIGTTIN, SIG_DFL);
     signal(SIGTTOU, SIG_DFL);
-    signal(SIGCHLD, SIG_DFL);
 
     if (isBackground == true)
     {
@@ -1591,6 +1605,10 @@ int main(int argc, char* argv[])
     // Create the signal array for blocking/unblocking
     // The main process needs to block, while the children can unblock
     // the signals
+    struct sigaction sa = {0};
+	sa.sa_sigaction = shellHandler;
+	sa.sa_flags = SA_SIGINFO;
+
     int signalArray[] = {SIGINT, SIGKILL, SIGTSTP, -1};
     sigset_t set = createSignalSet(signalArray);
 
@@ -1607,6 +1625,13 @@ int main(int argc, char* argv[])
 	// Now start the event loop
 	while((buffer = lineget(buffer)))
     {
+        if (strcmp(buffer, "\n") == 0) {
+            printPrompt();
+            continue;
+        }
+        // Enable SIGCHLD Handler for capturing status of bg processes
+        sigaction(SIGCHLD, &sa, NULL);
+
         // Get the argument length
         argLength = getArgumentLength(buffer);
         argVector= (char**) malloc ((argLength + 1)* sizeof(char*));
