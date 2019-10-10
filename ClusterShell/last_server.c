@@ -18,36 +18,26 @@ int num_clients = 0;
 int SEND_ALL = 0;
 fd_set readfds;
 int max_sd;
-
-char shared_buffer[256], shared_users[256][256];
-pthread_t thread_id;
-pthread_mutex_t lock;
+int SEND_TO_FD = -1;
 
 
 struct clients {
     int fd;
-    int pid;
+    int num;
     struct sockaddr_in clientAddr;
     struct clients* next;
 };
-
-struct thread_args {
-    int sock;
-    int id;
-};
-
-void *client_thread(void*);
 
 typedef struct clients clients;
 
 clients* client_list = NULL;
 
-clients* addClient(clients* head, int fd, int pid, struct sockaddr_in addr)
+clients* addClient(clients* head, int fd, struct sockaddr_in addr)
 {
     if (head == NULL) {
         clients* node = (clients*) malloc (sizeof(clients));
         node->clientAddr = addr;
-        node->pid = pid;
+        node->num = num_clients;
         node->fd = fd;
         node->next = NULL;
         return node;
@@ -57,25 +47,25 @@ clients* addClient(clients* head, int fd, int pid, struct sockaddr_in addr)
     clients* node = (clients*) malloc (sizeof(clients));
     node->clientAddr = addr;
     node->fd = fd;
-    node->pid = pid;
+    node->num = num_clients;
     node->next = temp;
     head = node;
     return head;
 }
 
-clients* removeClient(clients* head, int removepid)
+clients* removeClient(clients* head, int removefd)
 {
     clients* temp = head;
     if (temp == NULL)
         return NULL;
-    if (temp->pid == removepid) {
+    if (temp->fd == removefd) {
         head = temp->next;
         temp->next = NULL;
         free(temp);
         return head;
     }
     if (temp->next == NULL) {
-        if (temp->pid == removepid) {
+        if (temp->fd == removefd) {
             free(temp);
             return NULL;
         }
@@ -83,7 +73,7 @@ clients* removeClient(clients* head, int removepid)
     }
 
     while (temp->next) {
-        if (temp->next->pid == removepid) { 
+        if (temp->next->fd == removefd) { 
             clients* node = temp->next;
             temp->next = node->next;
             node->next = NULL;
@@ -101,7 +91,7 @@ void printClients(clients* head)
     int i = 0;
     while (temp) {
         char* ip_addr = inet_ntoa(temp->clientAddr.sin_addr);
-        printf("%d. fd = %d, pid = %d, IP = %s\n", i, temp->fd, temp->pid, ip_addr);
+        printf("%d. fd = %d, IP = %s\n", i, temp->fd, ip_addr);
         i++;
         temp = temp->next;
     }
@@ -231,6 +221,14 @@ void chat_with_client(struct sockaddr_in client_addr, int sockfd)
     } 
 } 
 
+void sendtoAllfds(int sd, char* buffer)
+{
+    for (int a=0; a<MAX_NODES; a++) {
+        if (client_fds[a] != 0 && client_fds[a] != sd)
+            send(client_fds[a], buffer, strlen(buffer), 0);
+    }
+}
+
 int main()
 {
     // Store the node names and IPs
@@ -315,32 +313,6 @@ int main()
     int sd;
     int activity;
 
-    int i = 0;
-
-    while (1) {
-        connfd = accept(listenfd, (struct sockaddr*)&cliaddr, &len);
-        if (connfd < 0)
-            printf("ERROR on accept");
-
-        // New Thread for client
-        struct thread_args args;
-        args.sock = connfd;
-        args.id = i++;
-
-        bzero(shared_users[args.id], 256);
-        sprintf(shared_users[args.id], "client-%d", args.id);
-
-        if (pthread_create(&thread_id, NULL, client_thread, (void*) &args)) {
-            printf("Error creating thread");
-        }
-
-    }
-
-    pthread_join(thread_id, NULL);
-    pthread_mutex_destroy(&lock);
-    close(listenfd);
-    return 0;
-
     while (1) {
         // Clear the socket set
         FD_ZERO(&readfds);
@@ -370,6 +342,8 @@ int main()
 
             printf("New Connection , socket fd is %d, ip is : %s , port : %d\n", connfd, inet_ntoa(cliaddr.sin_addr), ntohs(cliaddr.sin_port));
 
+            client_list = addClient(client_list, connfd, cliaddr);
+
             if (send(connfd, "Hello Client!", 13, 0) != 13)
                 perror("send");
             printf("Welcome message sent successfully!\n");
@@ -392,6 +366,7 @@ int main()
                 if ((valread = read(sd, buffer, 1024)) == 0) {
                     getpeername(sd, (struct sockaddr*)&cliaddr, (socklen_t*)&len);
                     printf("Host Disconnected , ip %s , port %d \n", inet_ntoa(cliaddr.sin_addr), ntohs(cliaddr.sin_port));
+                    client_list = removeClient(client_list, sd);
 
                     close(sd);
                     client_fds[i] = 0;
@@ -399,13 +374,40 @@ int main()
 
                 else {
                     buffer[valread] = '\0';
-                    if (strncmp(buffer, "sendall", 7) == 0) {
-                        for (int a=0; a<MAX_NODES; a++) {
-                            if (client_fds[a] != 0 && client_fds[a] != sd)
-                                send(client_fds[a], buffer, strlen(buffer), 0);
-                        }
+                    if (SEND_TO_FD != -1) {
+                        printf("Client sent %s\n", buffer);
+                        write(SEND_TO_FD, buffer, sizeof(buffer));
+                        SEND_TO_FD = -1;
+                        continue;
                     }
-                    send(sd, buffer, strlen(buffer), 0);
+                    if (strncmp(buffer, "sendall", 7) == 0) {
+                        sendtoAllfds(sd, buffer);
+                    }
+                    if (buffer[0] != '\0' && buffer[1] != '\0' && buffer[0] == 'n' && (buffer[1] == '1' || buffer[1] == '2' || buffer[1] == '3') && buffer[2] == '.') {
+                        for (int i=0; i<curr; i++) {
+                            if (strncmp(nodes[i], buffer, 2) == 0) {
+                                printf("Send to node %d with ip %s\n", i, ip[i]);
+                                clients* temp = client_list;
+                                while (temp) {
+                                    char* ipaddr = inet_ntoa((temp->clientAddr).sin_addr);
+                                    if (strncmp(inet_ntoa((temp->clientAddr).sin_addr), ip[i], strlen(ipaddr)) == 0) {
+                                        send(temp->fd, buffer+3, strlen(buffer) - 3, 0);
+                                        SEND_TO_FD = sd;
+                                        break;
+                                    }
+                                    temp = temp->next;
+                                }
+                                break;
+                            }
+                        }
+
+                        //send(sd, buffer+3, strlen(buffer) - 3, 0);
+                    }
+                    else {
+                        send(sd, buffer, strlen(buffer) , 0);
+                        // Send some message
+                    }
+                     
                 }
             }
             
@@ -421,76 +423,4 @@ int main()
     free(ip);
 
     return 0;
-}
-
-
-void *client_thread(void* args_ptr)
-{
-    struct thread_args* args = (struct thread_args*) args_ptr;
-    int sock, id, n;
-    sock = args->sock;
-    id = args->id;
-
-    char buffer[256], message[256], msg_token;
-
-    pthread_mutex_lock(&lock);
-    bzero(shared_users[id], 256);
-    sprintf(shared_users[id], "client-%d", id);
-    pthread_mutex_unlock(&lock);
-
-    bzero(buffer, 256);
-    sprintf(buffer, "Welcome to the Server");
-    n = write(sock, buffer, 256);
-    if (n < 0) return NULL;
-    
-    /* write new connections to shared buffer*/
-    printf("%s has joined\n", shared_users[id]);
-
-    pthread_mutex_lock(&lock);
-    bzero(shared_buffer, 256);
-    sprintf(shared_buffer, "%s has joined", shared_users[id]);
-    pthread_mutex_unlock(&lock);
-
-    while (1) {
-        /* read new message into buffer */
-        bzero(buffer, 256);
-        n = recv(sock, buffer, 256-1, MSG_DONTWAIT); /* non-blocking read */
-        if (n < 0) {
-            /* write current message back to client */
-            n = write(sock, shared_buffer, strlen(shared_buffer));
-            if (n < 0) {
-                /* if we can't write to the client that means they
-                 * have disconnected from the server */
-                printf("%s has disconnected\n", shared_users[id]);
-
-                /* let other users know of disconnection */
-                pthread_mutex_lock(&lock);
-                bzero(shared_buffer, 256);
-                sprintf(shared_buffer, "%s has disconnected", shared_users[id]);
-                pthread_mutex_unlock(&lock);
-                break;
-            }
-        } else {
-            msg_token = buffer[0];
-            /* write new message to shared_buffer */
-            printf("%s: %s", shared_users[id], buffer);
-
-            pthread_mutex_lock(&lock);
-            bzero(shared_buffer, 256);
-            sprintf(shared_buffer, "%s: %s", shared_users[id], message);
-            pthread_mutex_unlock(&lock);
-        }
-
-        /* don't bombard the client */
-        sleep(2);
-    }
-    printf("%s has exited\n", shared_users[id]);
-    /* zero out username If client does not exit cleanly (telnet q)
-     * then username may not get removed */
-    pthread_mutex_lock(&lock);
-    memset(shared_users[id], 0, 256);
-    pthread_mutex_unlock(&lock);
-
-    close(sock);
-    return NULL;
 }

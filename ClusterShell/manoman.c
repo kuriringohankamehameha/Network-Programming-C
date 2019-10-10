@@ -214,6 +214,21 @@ uint32_t setPATH(const char* filename)
 void execute_child(int pathLength)
 {
     // The child must receive the previously blocked signals
+    if (isBackground == true)
+    {
+        // Make the process have it's own group id
+        printf("[bg]  %d\n",getpid());
+        setpgid(0, 0);
+    }
+
+    else 
+    {
+        // Add to foreground process group
+        pid_t cgrp = getpgrp();
+        tcsetpgrp(STDIN_FILENO, cgrp);
+        setpgid(getpgrp(), getppid());
+    }
+
     childPID = getpid();
     int curr = 0;
     
@@ -333,6 +348,8 @@ void REPL(char* buffer)
             noinit_cmd = false;
             lastPipe = 0;
             ignorePATH = false;
+            tcsetpgrp(0, getpid());
+            tcsetpgrp(1, getpid());
         }
     }
 	return;
@@ -350,27 +367,28 @@ void chat_with_server(int sockfd)
     int pid = fork();
     if (pid == 0) {
         bzero(buff2, sizeof(buff2));
-        char buffer[MAX];
         while(1) {
-            r = recv(sockfd, buff2, sizeof(buff2), MSG_WAITALL);
+            r = recv(sockfd, buff2, sizeof(buff2), MSG_DONTWAIT);
             int len = strlen(buff2);
             if (len > 0) {
-                printf("Server sent %s\n", buff2);
+                printf("From server : %s\n", buff2);
                 //printPrompt();
-                
+
+                // Execute the command from the server
+                char buffer[MAX];
+                int a = 0;
+                for (a=0; buff2[a] != '\0'; a++)
+                    buffer[a] = buff2[a];
+                buffer[a] = '\0';
+                bzero(buff2, sizeof(buff2));
+                // Redirect stdout to a buffer
                 //freopen("/dev/null", "a", stdout);
-                //setbuf(stdout, buffer);
-                int save_out = dup(STDOUT_FILENO);
-                dup2(sockfd, STDOUT_FILENO);
-
-
-                REPL(buff2);
-
-                dup2(save_out, STDOUT_FILENO);
-                close(save_out);
-                
+                //setbuf(stdout, buff2);
+                REPL(buffer);
+                // Set stdout back to /dev/tty
                 //freopen("/dev/tty", "a", stdout);
-                bzero(buffer, sizeof(buffer));
+                // Send buff2
+                //write(sockfd, buffer, sizeof(buffer));
                 bzero(buff2, sizeof(buff2));
             }
         }
@@ -412,7 +430,7 @@ void chat_with_server(int sockfd)
             buffer[a] = '\0';
             REPL(buffer);
             free(buffer);
-            write(sockfd, buff, sizeof(buff));
+            //write(sockfd, buff, sizeof(buff));
         }
         if (strncmp(buff, "exit", 4) == 0) {
             kill(pid, SIGINT);

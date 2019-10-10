@@ -352,22 +352,22 @@ void chat_with_server(int sockfd)
         bzero(buff2, sizeof(buff2));
         char buffer[MAX];
         while(1) {
-            r = recv(sockfd, buff2, sizeof(buff2), MSG_WAITALL);
+            r = recv(sockfd, buff2, sizeof(buff2), MSG_DONTWAIT);
             int len = strlen(buff2);
             if (len > 0) {
-                printf("Server sent %s\n", buff2);
+                printf("Server sent %s", buffer);
                 //printPrompt();
                 
                 //freopen("/dev/null", "a", stdout);
                 //setbuf(stdout, buffer);
                 int save_out = dup(STDOUT_FILENO);
+                //int save_sock = dup(sockfd);
                 dup2(sockfd, STDOUT_FILENO);
-
-
                 REPL(buff2);
-
                 dup2(save_out, STDOUT_FILENO);
                 close(save_out);
+                //dup2(save_sock, sockfd);
+                //close(save_sock);
                 
                 //freopen("/dev/tty", "a", stdout);
                 bzero(buffer, sizeof(buffer));

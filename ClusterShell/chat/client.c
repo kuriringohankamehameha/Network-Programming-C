@@ -214,6 +214,21 @@ uint32_t setPATH(const char* filename)
 void execute_child(int pathLength)
 {
     // The child must receive the previously blocked signals
+    if (isBackground == true)
+    {
+        // Make the process have it's own group id
+        printf("[bg]  %d\n",getpid());
+        setpgid(0, 0);
+    }
+
+    else 
+    {
+        // Add to foreground process group
+        pid_t cgrp = getpgrp();
+        tcsetpgrp(STDIN_FILENO, cgrp);
+        setpgid(getpgrp(), getppid());
+    }
+
     childPID = getpid();
     int curr = 0;
     
@@ -273,7 +288,7 @@ void REPL(char* buffer)
     replaceSubstring(getcwd(s, 300));
     free(s);
 	
-    //printPrompt();
+    printPrompt();
 
 	// Now start the event loop
     // Get the argument length
@@ -333,6 +348,8 @@ void REPL(char* buffer)
             noinit_cmd = false;
             lastPipe = 0;
             ignorePATH = false;
+            tcsetpgrp(0, getpid());
+            tcsetpgrp(1, getpid());
         }
     }
 	return;
@@ -347,40 +364,10 @@ void chat_with_server(int sockfd)
     int num_read;
     int opts;
     int r;
-    int pid = fork();
-    if (pid == 0) {
-        bzero(buff2, sizeof(buff2));
-        char buffer[MAX];
-        while(1) {
-            r = recv(sockfd, buff2, sizeof(buff2), MSG_WAITALL);
-            int len = strlen(buff2);
-            if (len > 0) {
-                printf("Server sent %s\n", buff2);
-                //printPrompt();
-                
-                //freopen("/dev/null", "a", stdout);
-                //setbuf(stdout, buffer);
-                int save_out = dup(STDOUT_FILENO);
-                dup2(sockfd, STDOUT_FILENO);
-
-
-                REPL(buff2);
-
-                dup2(save_out, STDOUT_FILENO);
-                close(save_out);
-                
-                //freopen("/dev/tty", "a", stdout);
-                bzero(buffer, sizeof(buffer));
-                bzero(buff2, sizeof(buff2));
-            }
-        }
-        exit(0);
-    }
-
     for (;;) {
-        //bzero(buff, sizeof(buff));
-        //read(sockfd, buff, sizeof(buff));
-        //printf("\n\nFrom Server : %s\n\n", buff);
+        bzero(buff, sizeof(buff));
+        read(sockfd, buff, sizeof(buff));
+        printf("\n\nFrom Server : %s\n\n", buff);
 
         bzero(buff, sizeof(buff));
         bzero(buff2, sizeof(buff2));
@@ -389,6 +376,11 @@ void chat_with_server(int sockfd)
         //opts = fcntl(sockfd, F_GETFL);
         //opts = (opts | O_NONBLOCK);
         while ((buff[n++] = getchar()) != '\n' ) {
+            r = recv(sockfd, buff2, sizeof(buff2), MSG_DONTWAIT);
+            int len = strlen(buff2);
+            if (len > 0) {
+                printf("\nFrom server%s\n", buff2);
+            }
         }
         //opts = opts & (~O_NONBLOCK);
         buff[n] = '\n';
@@ -415,7 +407,6 @@ void chat_with_server(int sockfd)
             write(sockfd, buff, sizeof(buff));
         }
         if (strncmp(buff, "exit", 4) == 0) {
-            kill(pid, SIGINT);
             printf("Client has exited\n");
             break;
         }
