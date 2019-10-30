@@ -1,0 +1,7 @@
+*
+!.gitignore
+!msg.c
+!Makefile
+!vote.c
+!README.md
+!*/

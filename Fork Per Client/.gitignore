@@ -1,0 +1,7 @@
+*
+!.gitignore
+!client.c
+!Makefile
+!tcp_server_N_clients.c
+!README.md
+!*/
