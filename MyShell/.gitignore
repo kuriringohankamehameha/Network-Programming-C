@@ -1,0 +1,9 @@
+*
+**/*
+!.gitignore
+!*.c
+!Makefile
+!*.c
+!README.md
+!description.txt
+!*/
