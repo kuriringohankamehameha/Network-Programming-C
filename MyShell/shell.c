@@ -1,5 +1,18 @@
 #define _GNU_SOURCE
-#include "shell.h"
+#include<stdio.h>
+#include<stdlib.h>
+#include<pthread.h>
+#include<string.h>
+#include<unistd.h>
+#include<sys/types.h>
+#include<sys/stat.h>
+#include<signal.h>
+#include<fcntl.h>
+#include<errno.h>
+#include<sys/msg.h>
+#include<sys/wait.h>
+#include<sys/shm.h>
+#include<syslog.h>
 
 #define MAX_NUM_PATHS 100
 #define uint32_t u_int32_t 
@@ -15,12 +28,14 @@
 
 enum bool { false = 0, true = ~0 };
 enum _Status { STATUS_SUSPENDED, STATUS_BACKGROUND, STATUS_FOREGROUND };
+enum ptype { NONE, PIPE, MSG, SHM };
 
 typedef struct _Job_t Job;
 typedef struct _Node_t Node;
 typedef struct _Message_t Message;
 typedef enum _Status Status;
 typedef enum bool bool; 
+typedef enum ptype ptype;
 
 bool isSuspended = false;
 
@@ -73,6 +88,7 @@ int shmemory = 0;
 char* current_directory;
 Job* jobSet; // Initialize the jobset
 bool is_daemon = false; // For daemon checking
+ptype pipeType = NONE;
 
 /* Declare all Functions here */
 Job* createJobs(Node node)
@@ -571,6 +587,69 @@ int getPIDfromname(Job* jobSet, char* name)
     return 0;
 }
 
+FILE* popen_read()
+{
+    int fd[2];
+    int read_fd, write_fd;
+    int pid;               
+
+    pipe(fd);
+    read_fd = fd[0];
+    write_fd = fd[1];
+
+    pid = fork();
+    if (pid == 0) {
+
+        close(read_fd);
+        dup2(write_fd,1);
+        close(write_fd);
+
+        int curr = 0;
+        while(curr < pathLength) {
+            if (execvp(str_concat(PATH[curr], command[0]), command) < 0)
+                curr ++;
+        }
+
+        printf("myShell: %s - Command not found\n", command[0]);
+        return NULL;
+    } else {
+        close(write_fd);
+        return fdopen(read_fd, "r");
+    }
+}
+
+FILE* popen_write(char ***cmd)
+{
+    int fd[2];
+    int read_fd, write_fd;
+    int pid;               
+
+    pipe(fd);
+    read_fd = fd[0];
+    write_fd = fd[1];
+
+    pid = fork();
+    if (pid == 0) {
+        close(write_fd);
+        dup2(read_fd,0);
+        close(read_fd);
+
+        int curr = 0;
+        while(curr < pathLength) {
+            if (execvp(str_concat(PATH[curr], *(cmd)[0]), *(cmd)) < 0)
+                curr ++;
+        }
+
+        printf("myShell: %s - Command not found\n", *(cmd)[0]);
+        return NULL;
+
+    } else {
+        close(read_fd);
+        return fdopen(write_fd, "w");
+    }
+}
+
+
 void executePipe(char ***cmd)
 {
     int p[2];
@@ -641,53 +720,97 @@ void executePipe(char ***cmd)
         }
     }
 
-    while (*cmd != NULL)
-    {
-        pipe(p);
-        if ((pid = fork()) == -1)
+    if (pipeType == PIPE) {
+        while (*cmd != NULL)
         {
-            printf("Error\n");
-            exit(1);
-        }
-        else if (pid == 0)
-        {
-            dup2(fd_in, STDIN_FILENO);
-            if (*(cmd + 1) != NULL)
-                dup2(p[1], STDOUT_FILENO);
-            else
+            pipe(p);
+            if ((pid = fork()) == -1)
             {
-                if (redirection_out_pipe == 1)
+                printf("Error\n");
+                exit(1);
+            }
+            else if (pid == 0)
+            {
+                dup2(fd_in, STDIN_FILENO);
+                close(fd_in);
+                if (*(cmd + 1) != NULL)
+                    dup2(p[1], STDOUT_FILENO);
+                else
                 {
-                    dup2(file_fd_out, STDOUT_FILENO);
-                    close(file_fd_out);
+                    if (redirection_out_pipe == 1)
+                    {
+                        dup2(file_fd_out, STDOUT_FILENO);
+                        close(file_fd_out);
+                    }
                 }
+                
+                close(p[0]);
+                int curr = 0;
+                while (curr < pathLength) {
+                    if (execvp(str_concat(PATH[curr], (*cmd)[0]), *cmd) < 0)
+                        curr ++;
+                }
+                exit(1);
             }
-            
-            close(p[0]);
-            int curr = 0;
-            while (curr < pathLength) {
-                if (execvp(str_concat(PATH[curr], (*cmd)[0]), *cmd) < 0)
-                    curr ++;
+            else{
+                wait(NULL);
+                close(p[1]);
+                fd_in = p[0];
+                cmd++;
             }
-            exit(1);
         }
-        else{
-            wait(NULL);
-            close(p[1]);
-            fd_in = p[0];
+        if (redirection_in_pipe == 1)
+        {
+            dup2(save_in, STDIN_FILENO);
+            close(save_in);
+        }
+        if (redirection_out_pipe == 1)
+        {
+            dup2(save_out, STDOUT_FILENO);
+            close(save_out);
+        }
+    }       
+
+    else if (pipeType == MSG) {
+        
+        Message message;
+        message.mtype = 23;
+        memset(&(message.mtext), 0, 8192 * sizeof(char));
+        int msgqid = msgget(IPC_PRIVATE, IPC_CREAT | 0666);
+        
+        FILE *input_pipe, *output_pipe;
+        int count = 0;
+        input_pipe = stdin;
+        
+        while (*cmd != NULL) {
+            // Reveive STDIN from msgq and send stdout to the msgq
+            int fd[2];
+            pipe(fd);
+            if (fork() == 0)
+            {
+                dup2(fd[1], STDOUT_FILENO);
+                close(fd[1]);
+                dup2(fd[0], STDIN_FILENO);
+            }
+            fclose(input_pipe);
+            if (*(cmd + 1) != NULL)
+                input_pipe = fdopen(fd[0], "r");
             cmd++;
+            count++;
         }
-    }
-    if (redirection_in_pipe == 1)
-    {
-        dup2(save_in, STDIN_FILENO);
-        close(save_in);
-    }
-    if (redirection_out_pipe == 1)
-    {
-        dup2(save_out, STDOUT_FILENO);
-        close(save_out);
-    }
+
+        msgctl(msgqid, IPC_RMID, NULL);
+        if (redirection_in_pipe == 1)
+        {
+            dup2(save_in, STDIN_FILENO);
+            close(save_in);
+        }
+        if (redirection_out_pipe == 1)
+        {
+            dup2(save_out, STDOUT_FILENO);
+            close(save_out);
+        }
+    }        
 }
 
 void execRedirect(int redirection)
@@ -790,23 +913,12 @@ void shellMsgQ(char*** outputs)
     message.mtype = 23;
     memset(&(message.mtext), 0, 8192 * sizeof(char));
 
-    char* temp = (char*) malloc (sizeof(char));
-    
-    for (int i=0; command[i]!=NULL; i++)
-    {
-        if (i == 0)
-            strcpy(temp, command[i]);
-
-        else
-            temp = str_concat(temp, command[i]);
-
-        if (command[i+1] != NULL)
-            temp = str_concat(temp, " ");
-    }
-    
     if (fork() == 0)
     {
-        FILE* cmd = popen(temp, "r"); 
+        FILE* cmd = popen_read(); 
+        if (cmd == NULL) {
+            exit(0);
+        }
         int SIZE = 8192;
         char buffer[SIZE];
 
@@ -814,7 +926,7 @@ void shellMsgQ(char*** outputs)
         while((n = fread(buffer, 1, sizeof(buffer)-1, cmd)) > 0)
             buffer[n] = '\0';
 
-        pclose(cmd);
+        fclose(cmd);
 
         strcpy(message.mtext, buffer);
 
@@ -834,27 +946,18 @@ void shellMsgQ(char*** outputs)
    {
        if ( fork() == 0 )
        {
-           char* output_cmd = (char*) malloc (sizeof(char));
-           for(int j=0; outputs[i][j]!=NULL; j++)
-           {
-                if (j == 0)
-                    strcpy(output_cmd, outputs[i][j]);
-                else
-                {
-                    output_cmd = str_concat(output_cmd, " ");
-                    output_cmd = str_concat(output_cmd, outputs[i][j]);   
-                }
-           }
-
-           FILE* inp = popen(str_concat("/bin/", output_cmd), "w");
-           fputs(message.mtext, inp);
-           pclose(inp);
-           exit(0);
+            FILE* inp = popen_write(&outputs[i]);
+            if (inp == NULL) {
+                exit(0);
+            }
+            fputs(message.mtext, inp);
+            fclose(inp);
+            exit(0);
        }
        else
            wait(NULL);
    }
-    
+   msgctl(msgqid, IPC_RMID, NULL);
 }
 
 void shellShm(char*** outputs)
@@ -869,25 +972,10 @@ void shellShm(char*** outputs)
         exit(0);
     }   
     
-    char* temp = (char*) malloc (sizeof(char));
-    
-    for (int i=0; command[i]!=NULL; i++)
-    {
-        if (i == 0)
-            strcpy(temp, command[i]);
-
-        else
-            temp = str_concat(temp, command[i]);
-
-        if (command[i+1] != NULL)
-            temp = str_concat(temp, " ");
-
-    }
-    
     if (fork() == 0)
     {
         char* str = (char*) shmat(shmid, (void*)0,0);
-        FILE* cmd = popen(temp, "r"); 
+        FILE* cmd = popen_read(); 
         int SIZE = 8192;
         char buffer[SIZE];
 
@@ -921,7 +1009,11 @@ void shellShm(char*** outputs)
                 }
            }
 
-           FILE* inp = popen(str_concat("/bin/", output_cmd), "w");
+           FILE* inp = popen_write(&outputs[i]);
+           if (inp == NULL) {
+                exit(0);
+           }
+               
            fputs(str, inp);
            pclose(inp);
            exit(0);
@@ -929,9 +1021,9 @@ void shellShm(char*** outputs)
        else
            wait(NULL);
    }
+
    shmdt(str);
    shmctl(shmid, IPC_RMID, NULL);
-    
 }
 
 pid_t daemonizeProcess()
@@ -1141,8 +1233,15 @@ void count_pipes()
     int counter = 0;
     for (int i=0; argVector[i]!=NULL; i++)
     {
-       if (strcmp(argVector[i], "|") == 0)
+       if (strcmp(argVector[i], "|") == 0 || strcmp(argVector[i], "#") == 0 || strcmp(argVector[i], "S") == 0) {
            counter ++;
+           if (strcmp(argVector[i], "|") == 0)
+               pipeType = PIPE;
+           else if (strcmp(argVector[i], "#") == 0)
+               pipeType = MSG;
+           else
+               pipeType = SHM;
+       }       
     }
     if (counter == 0)
         noinit_cmd = true;
@@ -1151,7 +1250,7 @@ void count_pipes()
     return;
 }
 
-int pipe_filter()
+int pipe_filter() 
 {
     int a = 0;
 
@@ -1161,7 +1260,7 @@ int pipe_filter()
     for (int i=0; argVector[i] != NULL; i++)
     {
         pipeargCount ++;
-        if (strcmp(argVector[i], "|") == 0)
+        if (strcmp(argVector[i], "|") == 0 || strcmp(argVector[i], "#") == 0 || strcmp(argVector[i], "S") == 0)
         {
             if (i > 2 && strcmp(argVector[i-2], "<") == 0)
             {
@@ -1220,7 +1319,7 @@ void output_redirection(int a)
     // Execute the Pipe sequence after suitable redirection
     for(a=lastPipe + 1; argVector[a]!=NULL; a++)
     {
-        if (strcmp(argVector[a], "|") != 0)
+        if (strcmp(argVector[a], "|") != 0 && strcmp(argVector[a], "#") != 0 && strcmp(argVector[a], "S") != 0)
         {
             commands[pipeCount][a-lastPipe-1] = (char*) realloc (commands[pipeCount][a-lastPipe-1], strlen(argVector[a])+1);    
             strcpy(commands[pipeCount][a-lastPipe-1], argVector[a]);
@@ -1244,14 +1343,13 @@ void output_redirection(int a)
             redirection_out_pipe = 1;
         else
         {
-            printf("myShell: Multiple Outdirection Operators with Pipes");
+            printf("myShell: Multiple Outdirection Operators with Pipes\n");
             badRedirectpipe = 1;
             return;
         }
     }
 
     executePipe(commands);
-    printPrompt();
     return;
 }
 
@@ -1625,6 +1723,7 @@ int main(int argc, char* argv[])
 	// Now start the event loop
 	while((buffer = lineget(buffer)))
     {
+        pipeType = NONE;
         if (strcmp(buffer, "\n") == 0) {
             printPrompt();
             continue;

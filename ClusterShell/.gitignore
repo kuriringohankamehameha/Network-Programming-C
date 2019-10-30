@@ -1,0 +1,7 @@
+*
+!.gitignore
+!clustershell_client.c
+!Makefile
+!clustershell_server.c
+!README.md
+!*/

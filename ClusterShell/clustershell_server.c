@@ -1,5 +1,20 @@
-#define _GNU_SOURCE
-#include "cluster.h"
+#include<stdio.h>
+#include<pthread.h>
+#include<stdlib.h>
+#include<string.h>
+#include<unistd.h>
+#include<sys/types.h>
+#include<sys/stat.h>
+#include<signal.h>
+#include<fcntl.h>
+#include<errno.h>
+#include<sys/socket.h>
+#include<sys/types.h>
+#include<netdb.h>
+#include<netinet/in.h>
+#include<arpa/inet.h>
+#include<sys/time.h>
+
 #define PORT 8080
 #define MAX 300
 #define MAX_NODES 200
@@ -19,6 +34,7 @@ int SEND_ALL = 0;
 fd_set readfds;
 int max_sd;
 int SEND_TO_FD = -1;
+int SEND_TO_FD_STAR = -1;
 pthread_mutex_t mutex;
 
 struct clients {
@@ -126,6 +142,7 @@ static void signal_handler(int signo)
 {
     if (signo == SIGINT) {
         printf("\nServer Exiting...\n");
+        shutdown(listenfd, SHUT_RDWR);
         close(listenfd);
         for (int i=0; i < MAX_NODES; i++) {
             free(nodes[i]);
@@ -141,8 +158,6 @@ static void signal_handler(int signo)
         int pid;
         // To avoid zombie processes
         while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-            // Remove the client from the list of clients
-            client_list = removeClient(client_list, pid);
         }
         return;
     }
@@ -229,16 +244,16 @@ void sendtoAllfds(int sd, char* buffer)
     }
 }
 
+pthread_mutex_t mutex;
+int n=0;
 
 void sendtoall(char *msg,int curr){
     int i;
     pthread_mutex_lock(&mutex);
-    for(i = 0; i < num_clients; i++) {
-        if(client_fds[i] != curr) {
-            if(send(client_fds[i],msg,strlen(msg),0) < 0) {
-                printf("sending failure \n");
-                continue;
-            }
+    for(i = 0; i < n; i++) {
+        if(send(client_fds[i],msg,strlen(msg),0) < 0) {
+            printf("sending failure \n");
+            continue;
         }
     }
     pthread_mutex_unlock(&mutex);
@@ -246,49 +261,59 @@ void sendtoall(char *msg,int curr){
 
 void *recvmg(void *client_sock){
     int sock = *((int *)client_sock);
-    char msg[500];
+    char msg[5000];
+    char big_msg[8000];
+    bzero(big_msg, sizeof(big_msg));
     int len;
-    int valread;
-    char buffer[1024];
-    int sd = sock;
-    while ((valread = recv(sd, buffer, 1024, 0)) > 0) {
-        buffer[valread] = '\0';
-        printf("Client sent %s\n", buffer);
-        if (strncmp(buffer, "sendall", 7) == 0) {
-            sendtoall(buffer, sock);
+    int counter = 0;
+    while((len = recv(sock,msg,5000,0)) > 0) {
+        msg[len] = '\0';
+        printf("msg = %s\n", msg);
+        if (strncmp(msg+2, "nodes", 5) == 0 ) {
+            printClients(client_list);
+            continue;
         }
-        if (buffer[0] != '\0' && buffer[1] != '\0' && buffer[0] == 'n' && (buffer[1] == '1' || buffer[1] == '2' || buffer[1] == '3') && buffer[2] == '.') {
-            for (int i=0; i<curr; i++) {
-                if (strncmp(nodes[i], buffer, 2) == 0) {
-                    printf("Send to node %d with ip %s\n", i, ip[i]);
-                    clients* temp = client_list;
-                    while (temp) {
-                        char* ipaddr = inet_ntoa((temp->clientAddr).sin_addr);
-                        if (strncmp(inet_ntoa((temp->clientAddr).sin_addr), ip[i], strlen(ipaddr)) == 0) {
-                            send(temp->fd, buffer+3, strlen(buffer) - 3, 0);
-                            SEND_TO_FD = sd;
-                            break;
-                        }
-                        temp = temp->next;
-                    }
-                    break;
-                }
+        if (SEND_TO_FD != -1) {
+            send(SEND_TO_FD, msg, strlen(msg), 0);
+            SEND_TO_FD = -1;
+            continue;
+        }
+        else if (SEND_TO_FD_STAR != -1) {
+            if (counter > 0) {
+                send(SEND_TO_FD_STAR, msg, strlen(msg), 0);
+                counter --;
+                continue;
             }
+            SEND_TO_FD_STAR = -1;
+            continue;
+        }
+        for (int i=0; i<curr; i++) {
+            if (strncmp(nodes[i], msg+2, strlen(nodes[i])) == 0) {
+                if (client_fds[i] != 0) {
+                    send(client_fds[i], msg + 3 + strlen(nodes[i]), strlen(msg+2) - strlen(nodes[i]), 0);
+                    SEND_TO_FD = sock;
+                    break;
+                } 
+            }
+        }
 
-            //send(sd, buffer+3, strlen(buffer) - 3, 0);
-        }
-        else {
-            send(sd, buffer, strlen(buffer) , 0);
-            // Send some message
-        }
-        
+        if (strncmp(msg + 2, "n*.", 3) == 0 && strlen(msg + 2) > 3) {
+            SEND_TO_FD_STAR = sock;
+            sendtoall(msg + 5,sock);
+            counter = n;
+            bzero(big_msg, sizeof(big_msg));
+        }       
     }
+
+    struct sockaddr_in cliaddr;
+    int length = sizeof(cliaddr);
+    getpeername(sock, (struct sockaddr*)&cliaddr, (socklen_t*)&length);
+    client_list = removeClient(client_list, sock);
+    printf("Host disconnected , Socket fd is %d,  IP %s, PORT %d \n", sock, inet_ntoa(cliaddr.sin_addr), ntohs(cliaddr.sin_port));
     return NULL;
-    
 }
 
-int main()
-{
+int main(){
     // Store the node names and IPs
     nodes = (char**) malloc (MAX_NODES * sizeof(char*));
     ip = (char**) malloc (MAX_NODES * sizeof(char*));
@@ -336,64 +361,36 @@ int main()
     signal(SIGPIPE, SIG_IGN);
     fclose(fp);
 
-    int connfd;
-
-    struct sockaddr_in cliaddr, servaddr;
-
-    listenfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (listenfd == -1) {
-        printf("Couldn't create socket\n");
-        exit(0);
-    }
-
-    bzero(&servaddr, sizeof(servaddr));
-
-    servaddr.sin_family = AF_INET;
-    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-    servaddr.sin_port = htons(PORT);
-
-    // Bind Socket to IP
-    if (bind(listenfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) != 0) {
-        printf("Failed to bind to local endpoint\n");
-        exit(0);
-    }
-
-    // Start listening
-    if (listen(listenfd, 5) != 0) {
-        printf("Listen failed\n");
-        exit(0);
-    }
-    else {
-        printf("Server listening on Port %d\n", PORT);
-    }
-
+    struct sockaddr_in ServerIp, cliaddr;
     int len = sizeof(cliaddr);
-    int sd;
-    int activity;
-
     pthread_t recvt;
-
-    while (1) {
-
-        connfd = accept(listenfd, (struct sockaddr*)&cliaddr, &len);
-        if (connfd < 0) {
-            printf("Server accept failed\n");
-        }
-
-        printf("New Connection , socket fd is %d, ip is : %s , port : %d\n", connfd, inet_ntoa(cliaddr.sin_addr), ntohs(cliaddr.sin_port));
-
-        client_list = addClient(client_list, connfd, cliaddr);
+    int sock=0 , Client_sock=0;
+    
+    ServerIp.sin_family = AF_INET;
+    ServerIp.sin_port = htons(PORT);
+    ServerIp.sin_addr.s_addr = htonl(INADDR_ANY);
+    sock = socket( AF_INET , SOCK_STREAM, 0 );
+    if( bind( sock, (struct sockaddr *)&ServerIp, sizeof(ServerIp)) == -1 )
+        printf("Error while binding to Socket\n");
+    else
+        printf("Server Started\n");
+        
+    if( listen( sock ,20 ) == -1 )
+        printf("Failed to connect to Listening Socket\n");
+    printf("Server listening on Port %d\n", PORT);
+        
+    while(1){
+        if( (Client_sock = accept(sock, (struct sockaddr *)&cliaddr, &len)) < 0 )
+            printf("Accept failed\n");
+        printf("New Connection , Socket FD is %d, IP is : %s , PORT : %d\n", sock, inet_ntoa(cliaddr.sin_addr), ntohs(cliaddr.sin_port));
+        client_list = addClient(client_list, sock, cliaddr);
         pthread_mutex_lock(&mutex);
-        client_fds[num_clients] = connfd;
-        num_clients++;
-        pthread_create(&recvt,NULL,(void *)recvmg,&connfd);
+        client_fds[n]= Client_sock;
+        n++;
+        // creating a thread for each client 
+        pthread_create(&recvt,NULL,(void *)recvmg,&Client_sock);
         pthread_mutex_unlock(&mutex);
-
-        if (send(connfd, "Hello Client!", 13, 0) != 13)
-            perror("send");
-        printf("Welcome message sent successfully!\n");
-
-
     }
-    return 0;
+    return 0; 
+    
 }
