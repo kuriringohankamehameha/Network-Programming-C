@@ -1,8 +1,8 @@
 *
-**/*
 !.gitignore
 !engine.c
 !Makefile
 !shell.c
 !README.md
 !description.txt
+!*/
