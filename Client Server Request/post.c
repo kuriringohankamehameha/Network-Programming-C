@@ -27,11 +27,13 @@ ssize_t process_http(int sockfd, char *host, char *page, char *poststr)
 	char sendline[MAXLINE + 1], recvline[MAXLINE + 1];
 	char maxdata[MAXLINE + 1];
     ssize_t n;
+    printf("Poststring = %s", poststr);
 	snprintf(sendline, MAXSUB,
 		 "POST %s HTTP/1.1\r\n"
 		 "Host: %s\r\n"
-		 "Content-type: application/x-www-form-urlencoded\r\n"
-		 "Content-length: %d\r\n\r\n"
+         "User-Agent:Mozilla/5.0\r\n"
+		 "Content-Type: application/x-www-form-urlencoded\r\n"
+		 "Content-Length: %d\r\n\r\n"
 		 "%s", page, host, strlen(poststr), poststr);
 
 	write(sockfd, sendline, strlen(sendline));
