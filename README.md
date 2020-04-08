@@ -1,5 +1,8 @@
 # Repository of my Network Programming Assignments
 
+**Disclaimer**
+* Some of these programs may not actually run for you, since I may have missed ceratain files. If there are any problems, you could file an issue, indicating that a program wasn't working. I'll try to patch them whenever possible.
+
 ## Sequence of the Assignments in order
 
 ### 1. Load Balancer using Signals
