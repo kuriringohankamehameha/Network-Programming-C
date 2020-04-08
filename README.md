@@ -40,3 +40,15 @@
 ### 8. Fork Per Client Model
 
 * This program implements a TCP Echo Server having a maximum limit of a certain number of concurrent clients, and makes further clients wait until any one of them disconnects. The Server calls `fork()` per client and a System V Semaphore is used for keep track of the number of clients for IPC.
+
+### 9. UDPChatter
+
+* This program implements UDP Multicasting. There is no requirement of an explicit server. This is used in local network application like **DC++**. This is a Chat application which has a single room, where participants can enter and exit. Common messages are displayed in the main box, while explicit messages can be sent using channels.
+
+### 10. BigFileSystem
+
+* This is an attempt to implement a basic distributed filesystem hierarchy. There are multiple servers which share the filesystem, and the client and read, write, or modify the files in the filsystem as if it were his own computer.
+
+### 11. Packet Sniffer
+
+* This is a very simple packet sniffer written using UNIX raw sockets. Run this program using `sudo`, as you cannot create raw sockets as a non-admin user.
