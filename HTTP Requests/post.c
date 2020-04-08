@@ -57,11 +57,9 @@ int main(void)
 	struct sockaddr_in servaddr;
 
 	char **pptr;
-	//********** You can change. Puy any values here *******
-	char *hname = "fw.bits-pilani.ac.in";
-	char *page = "/httpclient.html";
-	char *poststr = "mode=191&username=f20170183&password=A7PS01839108#&a=%li&producttype=0\r\n";
-	//*******************************************************
+	char *hname = "google.com";
+	char *page = "/index.html";
+	char *poststr = "\r\n";
 
 	char str[50];
 	struct hostent *hptr;
