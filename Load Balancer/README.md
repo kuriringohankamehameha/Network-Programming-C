@@ -1,6 +1,4 @@
-#                     IS F462 Network Programming (Lab Exercise 1)
-
-## `$ R.VIJAY KRISHNA @ 2017A7PS0183P`
+# Load Balancer
 
 # General Outline of the Program            
 
@@ -45,7 +43,3 @@
 ```
 
 * The above would compile and run the program that reads from the file "sample.txt" and the Number of Children (N) = 5.
-
-# Regarding Plagiarism
-
-* I pledge that I have written most of the code by myself, along with a few helpful inputs and snippets from www.stackoverflow.com. For example, I've taken the `sigaction` call from stackoverflow, as I needed a reference. And the code involved in the question https://stackoverflow.com/questions/57620234/how-to-keep-sending-signals-to-children-from-parent-process-repeatedly is from me. I am the one who asked this question, so if the plagiarism checker detected that it matched with this website, I can provide relevant proof regarding the same.
