@@ -44,6 +44,10 @@
 
 * This program implements a TCP Echo Server having a maximum limit of a certain number of concurrent clients, and makes further clients wait until any one of them disconnects. The Server calls `fork()` per client and a System V Semaphore is used for keep track of the number of clients for IPC.
 
+### 9. N-Channel Stop and Wait Protocol
+
+* This program simulates an N-channel stop and wait protocol as a File Transfer Mechanism between a client and a server. This utilizes concurrent TCP connections and packet retransmission based on sequence numbers.
+
 ### 9. UDPChatter
 
 * This program implements UDP Multicasting. There is no requirement of an explicit server. This is used in local network application like **DC++**. This is a Chat application which has a single room, where participants can enter and exit. Common messages are displayed in the main box, while explicit messages can be sent using channels.
