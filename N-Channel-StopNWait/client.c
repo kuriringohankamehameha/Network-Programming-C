@@ -50,6 +50,8 @@ void connection_loop(int sockfd[NUM_CHANNELS], char* buffer, int buffer_size, in
                 }
             }
         }
+
+        time_t old_timeout = timeout;
         
         for (int i=0; i < NUM_CHANNELS; i++) {
             if (last_packet != -1 && i > last_packet) break;
@@ -59,6 +61,8 @@ void connection_loop(int sockfd[NUM_CHANNELS], char* buffer, int buffer_size, in
             pollfds[0].events = 0;
             pollfds[0].events |= POLLIN;
 
+            int timed_out = 9;
+
             while (poll(pollfds, 1, timeout) == 0) {
                 printf("Timeout: Retransmitting seq_no %lu on Channel %d\n", ntohll(tmp[i].header.seq_no), i);
                 int n = write(sockfd[i], (void*) &tmp[i], sizeof(Packet));
@@ -66,7 +70,11 @@ void connection_loop(int sockfd[NUM_CHANNELS], char* buffer, int buffer_size, in
                     fclose(fp);
                     error("ERROR writing to socket");
                 }
+                timeout = old_timeout;
+                timed_out = 1;
             }
+            if (timed_out == 1)
+                timeout = 0;
             int n = read(sockfd[i], &recv_packet, sizeof(Packet));
             if (n < 0)  {
                 fclose(fp);
@@ -81,6 +89,8 @@ void connection_loop(int sockfd[NUM_CHANNELS], char* buffer, int buffer_size, in
                 }
             }
         }
+        
+        timeout = old_timeout;
 
         if (is_eof == 1) {
             // Send a fin packet

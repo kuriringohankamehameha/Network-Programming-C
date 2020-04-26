@@ -31,7 +31,7 @@
 #define NUM_CHANNELS 3
 
 // Packet Drop Rate (Probability)
-#define PDR 0.1
+#define PDR 0.3
 
 // Timeout Macro (Client Side)
 #define TIMEOUT_SECS 2
