@@ -79,10 +79,10 @@ int main(int argc, char* argv[]) {
             uint64_t seq_no = 1;
             uint8_t is_last = 0;
             
-            struct sockaddr_storage client_address;
             socklen_t addr_len;
 
-            int num_bytes = recvfrom(listenfd, &recv_packet, sizeof(Packet), 0, (struct sockaddr*)&client_address, &addr_len);
+            int num_bytes = recvfrom(listenfd, &recv_packet, sizeof(Packet), 0, (struct sockaddr*)&cli_addr, &addr_len);
+            printf("New Connection on Listening Socket %d: IP is : %s, PORT : %d\n", listenfd, inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port));
             if (num_bytes < 0) {
                 perror("Error reading from socket");
                 exit(EXIT_FAILURE);
@@ -113,7 +113,7 @@ int main(int argc, char* argv[]) {
                 Packet send_packet = recv_packet;
                 send_packet.header.seq_no = htonll(seq_no);
                 send_packet.header.type = 1; // Sending ACK
-                num_bytes = sendto(listenfd, &send_packet, sizeof(Packet), 0, (struct sockaddr*)&client_address, addr_len);
+                num_bytes = sendto(listenfd, &send_packet, sizeof(Packet), 0, (struct sockaddr*)&cli_addr, addr_len);
                 if (num_bytes < 0) {
                     perror("Error writing to socket");
                     exit(EXIT_FAILURE);

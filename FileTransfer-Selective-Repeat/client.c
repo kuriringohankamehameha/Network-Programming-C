@@ -1,6 +1,6 @@
 #include "utils.h"
 
-void connection_loop(int sockfd[NUM_CHANNELS], char* buffer, int buffer_size, int chunk_size, FILE* fp, struct sockaddr_in serv_addr) {
+void connection_loop(int sockfd[NUM_CHANNELS], char* buffer, int buffer_size, int chunk_size, FILE* fp, struct sockaddr_in relay_addr[NUM_CHANNELS]) {
     int sin_size = sizeof(struct sockaddr);
     int is_eof = 0;
     int payload_size = 0;
@@ -38,7 +38,7 @@ void connection_loop(int sockfd[NUM_CHANNELS], char* buffer, int buffer_size, in
                 send_packet.header = header;
                 strncpy(send_packet.data, buffer, PACKET_SIZE);
                 tmp[i] = send_packet;
-                int n = sendto(sockfd[i], (void*) &send_packet, sizeof(Packet), 0, (struct sockaddr*)&serv_addr, sizeof(struct sockaddr));
+                int n = sendto(sockfd[i], (void*) &send_packet, sizeof(Packet), 0, (struct sockaddr*)&(relay_addr[i]), sizeof(struct sockaddr));
                 if (n < 0) {
                     fclose(fp);
                     error("ERROR writing to socket");
@@ -66,7 +66,7 @@ void connection_loop(int sockfd[NUM_CHANNELS], char* buffer, int buffer_size, in
 
             while (poll(pollfds, 1, timeout) == 0) {
                 printf("Timeout: Retransmitting seq_no %lu on Channel %d\n", ntohll(tmp[i].header.seq_no), i);
-                int n = sendto(sockfd[i], (void*) &tmp[i], sizeof(Packet), 0, (struct sockaddr*)&serv_addr, sizeof(struct sockaddr));
+                int n = sendto(sockfd[i], (void*) &tmp[i], sizeof(Packet), 0, (struct sockaddr*)&(relay_addr[i]), sizeof(struct sockaddr));
                 if (n < 0) {
                     fclose(fp);
                     error("ERROR writing to socket");
@@ -76,7 +76,7 @@ void connection_loop(int sockfd[NUM_CHANNELS], char* buffer, int buffer_size, in
             }
             if (timed_out == 1)
                 timeout = 0;
-            int n = recvfrom(sockfd[i], (void*) &recv_packet, sizeof(Packet), 0, (struct sockaddr*)&serv_addr, &sin_size);
+            int n = recvfrom(sockfd[i], (void*) &recv_packet, sizeof(Packet), 0, (struct sockaddr*)&(relay_addr[i]), &sin_size);
             if (n < 0)  {
                 fclose(fp);
                 error("ERROR reading from socket");
@@ -102,7 +102,7 @@ void connection_loop(int sockfd[NUM_CHANNELS], char* buffer, int buffer_size, in
             Packet send_packet = {0};
             send_packet.header = header;
             strcpy(send_packet.data, "exit");
-            int n = sendto(sockfd[0], (void*) &send_packet, sizeof(Packet), 0, (struct sockaddr*)&serv_addr, sizeof(struct sockaddr));
+            int n = sendto(sockfd[0], (void*) &send_packet, sizeof(Packet), 0, (struct sockaddr*)&(relay_addr[0]), sizeof(struct sockaddr));
             if (n < 0) {
                 fclose(fp);
                 error("ERROR writing to socket");
@@ -116,13 +116,13 @@ void connection_loop(int sockfd[NUM_CHANNELS], char* buffer, int buffer_size, in
 
             while (poll(pollfds, 1, timeout) == 0) {
                 printf("Timeout: Retransmitting seq_no %lu on Channel %d\n", ntohll(send_packet.header.seq_no), 0);
-                int n = sendto(sockfd[0], (void*) &send_packet, sizeof(Packet), 0, (struct sockaddr*)&serv_addr, sizeof(struct sockaddr));
+                int n = sendto(sockfd[0], (void*) &send_packet, sizeof(Packet), 0, (struct sockaddr*)&(relay_addr[0]), sizeof(struct sockaddr));
                 if (n < 0) {
                     fclose(fp);
                     error("ERROR writing to socket");
                 }
             }
-            n = recvfrom(sockfd[0], (void*) &recv_packet, sizeof(Packet), 0, (struct sockaddr*)&serv_addr, &sin_size);
+            n = recvfrom(sockfd[0], (void*) &recv_packet, sizeof(Packet), 0, (struct sockaddr*)&(relay_addr[0]), &sin_size);
             if (n < 0)  {
                 fclose(fp);
                 error("ERROR reading from socket");
@@ -145,12 +145,18 @@ int main(int argc, char *argv[])
 {
     int sockfd[NUM_CHANNELS];
     int portno;
-    struct sockaddr_in serv_addr;
+    struct sockaddr_in server_addr;
     struct hostent *server;
 
+    struct sockaddr_in relay_addr[NUM_CHANNELS] = {0};
+    struct hostent *relays[NUM_CHANNELS] = {0};
+
     char buffer[8192];
-    if (argc != 3) {
-       fprintf(stderr,"Usage: %s hostname port (Server Port)\n", argv[0]);
+    if (argc != (2 + NUM_CHANNELS)) {
+       fprintf(stderr, "Usage: %s <RELAY_PORT>", argv[0]);
+       for (int i=1; i <= NUM_CHANNELS; i++)
+           fprintf(stderr, " <RELAY_%d_IP>", i);
+       fprintf(stderr, "\n");
        exit(EXIT_FAILURE);
     }
     
@@ -161,8 +167,9 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
     
-    portno = atoi(argv[2]);
+    portno = atoi(argv[1]);
     
+    /*
     server = gethostbyname(argv[1]);
     
     if (server == NULL) {
@@ -170,16 +177,27 @@ int main(int argc, char *argv[])
         fclose(fp);
         exit(EXIT_FAILURE);
     }
+    */
+
+    for (int i=0; i < NUM_CHANNELS; i++) {
+        struct hostent* relay = gethostbyname(argv[2 + i]);
+        bzero((char *) &relay_addr[i], sizeof(struct sockaddr_in));
+        // bcopy((char *) &(relays[i]->h_addr), (char *) &(relay_addr[i].sin_addr.s_addr), relays[i]->h_length);
+        relay_addr[i].sin_family = AF_INET;
+        relay_addr[i].sin_port = htons(portno + i);
+    }
     
-    bzero((char *) &serv_addr, sizeof(serv_addr));
+    /*
+    bzero((char *) &server_addr, sizeof(server_addr));
     
     bcopy((char *)server->h_addr, 
-         (char *)&serv_addr.sin_addr.s_addr,
+         (char *)&server_addr.sin_addr.s_addr,
          server->h_length);
     
-    serv_addr.sin_family = AF_INET;
+    server_addr.sin_family = AF_INET;
     
-    serv_addr.sin_port = htons(portno);
+    server_addr.sin_port = htons(portno);
+    */
 
     for (int i=0; i < NUM_CHANNELS; i++) {
         sockfd[i] = socket(AF_INET, SOCK_DGRAM, 0);
@@ -190,7 +208,7 @@ int main(int argc, char *argv[])
     int buffer_size = 8192; int chunk_size = PACKET_SIZE;
     // Please don't be that retarded to violate this condition
     assert (buffer_size > chunk_size);
-    connection_loop(sockfd, buffer, buffer_size, chunk_size, fp, serv_addr);
+    connection_loop(sockfd, buffer, buffer_size, chunk_size, fp, relay_addr);
     
     fclose(fp);
     for (int i=0; i < NUM_CHANNELS; i++)
