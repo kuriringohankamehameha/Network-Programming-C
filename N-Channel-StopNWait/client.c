@@ -17,6 +17,8 @@ void connection_loop(int sockfd[NUM_CHANNELS], char* buffer, int buffer_size, in
 
     Packet tmp[NUM_CHANNELS] = {0};
 
+    int last_packet = -1;
+
     while (is_eof != 1) {
         // printf("Please enter the message: ");
         // bzero(buffer, buffer_size);
@@ -42,10 +44,15 @@ void connection_loop(int sockfd[NUM_CHANNELS], char* buffer, int buffer_size, in
                 }
                 printf("Sent Packet: With Seq. No. %lu of size %lu Bytes, via Channel %d\n", seq_no, ((uint64_t) payload_size), i);
                 seq_no += ntohll(send_packet.header.size);
+                if (ntohll(send_packet.header.size) == 0) {
+                    last_packet = i;
+                    break;
+                }
             }
         }
         
         for (int i=0; i < NUM_CHANNELS; i++) {
+            if (last_packet != -1 && i > last_packet) break;
             Packet recv_packet;
             struct pollfd pollfds[0];
             pollfds[0].fd = sockfd[i];

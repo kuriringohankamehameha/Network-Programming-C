@@ -45,8 +45,11 @@ int serve_connection(int sockfd, int channel, FILE* fp) {
             fseek(fp, seq_no, SEEK_SET);
             fwrite(recv_packet.data, 1, pkt_size, fp);
         }
-        printf("Received Packet: Seq. No. %lu of size %lu Bytes from Channel %d\n", seq_no, pkt_size, channel);
         is_last = recv_packet.header.is_last;
+        if (is_last == 0)
+            printf("Received Packet: Seq. No. %lu of size %lu Bytes from Channel %d\n", seq_no, pkt_size, channel);
+        else
+            printf("Received FIN Packet: Seq. No. %lu from Channel %d\n", seq_no, pkt_size, channel);
         Packet send_packet = recv_packet;
         send_packet.header.seq_no = htonll(seq_no);
         send_packet.header.type = 1; // Sending ACK
