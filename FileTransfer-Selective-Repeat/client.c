@@ -64,6 +64,8 @@ void connection_loop(int sockfd[NUM_CHANNELS], char* buffer, int buffer_size, in
 
             int timed_out = 9;
 
+            time_t start = clock();
+            
             while (poll(pollfds, 1, timeout) == 0) {
                 printf("Timeout: Retransmitting seq_no %lu on Channel %d\n", ntohll(tmp[i].header.seq_no), i);
                 int n = sendto(sockfd[i], (void*) &tmp[i], sizeof(Packet), 0, (struct sockaddr*)&(relay_addr[i]), sizeof(struct sockaddr));
@@ -76,6 +78,8 @@ void connection_loop(int sockfd[NUM_CHANNELS], char* buffer, int buffer_size, in
             }
             if (timed_out == 1)
                 timeout = 0;
+            else
+                timeout = clock() - start < timeout ? timeout - clock() + start : 0;
             int n = recvfrom(sockfd[i], (void*) &recv_packet, sizeof(Packet), 0, (struct sockaddr*)&(relay_addr[i]), &sin_size);
             if (n < 0)  {
                 fclose(fp);
@@ -84,7 +88,7 @@ void connection_loop(int sockfd[NUM_CHANNELS], char* buffer, int buffer_size, in
             if (recv_packet.header.type == 1) {
                 // Received ACK from Server
                 printf("Received ACK: For Packet with Sequence No: %lu, from Channel %d\n", ntohll(recv_packet.header.seq_no), i);
-                
+
                 if (ntohll(recv_packet.header.seq_no) == eof_seq_no) {
                     is_eof = 1;
                 }
@@ -181,8 +185,8 @@ int main(int argc, char *argv[])
 
     for (int i=0; i < NUM_CHANNELS; i++) {
         struct hostent* relay = gethostbyname(argv[2 + i]);
-        bzero((char *) &relay_addr[i], sizeof(struct sockaddr_in));
-        // bcopy((char *) &(relays[i]->h_addr), (char *) &(relay_addr[i].sin_addr.s_addr), relays[i]->h_length);
+        // bzero((char *) &relay_addr[i], sizeof(struct sockaddr_in));
+        // bcopy((char *) (relay->h_addr), (char *) &relay_addr[i].sin_addr.s_addr, relay->h_length);
         relay_addr[i].sin_family = AF_INET;
         relay_addr[i].sin_port = htons(portno + i);
     }

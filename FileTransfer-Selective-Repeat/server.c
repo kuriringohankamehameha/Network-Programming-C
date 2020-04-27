@@ -15,8 +15,8 @@ static void signal_handler(int signo) {
 
 int main(int argc, char* argv[]) {
     int server_port;
-    if (argc != 3) {
-        printf("Format : ./server MAX_CLIENTS PORT_NO\n");
+    if (argc != 2) {
+        printf("Format : ./server PORT_NO\n");
         exit(0);
     }
 
@@ -28,7 +28,7 @@ int main(int argc, char* argv[]) {
     
     struct sockaddr_in serv_addr, cli_addr;
 
-    server_port = atoi(argv[2]);
+    server_port = atoi(argv[1]);
 
     listenfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (listenfd < 0) {
@@ -50,6 +50,13 @@ int main(int argc, char* argv[]) {
     }
 
     listen(listenfd, MAX_CLIENTS);
+    int addr_len;
+    struct sockaddr server_address = {0};
+    getsockname(listenfd, &server_address, &addr_len);
+    char ip[16];
+    inet_ntop(AF_INET, &server_address, ip, sizeof(ip));
+    printf("Server Address: %s Port %d\n", ip, server_port);
+
     clilen = sizeof(cli_addr);
 
     signal(SIGINT, signal_handler);
@@ -82,48 +89,36 @@ int main(int argc, char* argv[]) {
             socklen_t addr_len;
 
             int num_bytes = recvfrom(listenfd, &recv_packet, sizeof(Packet), 0, (struct sockaddr*)&cli_addr, &addr_len);
-            printf("New Connection on Listening Socket %d: IP is : %s, PORT : %d\n", listenfd, inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port));
+            // printf("New Connection on Listening Socket %d: IP is : %s, PORT : %d\n", listenfd, inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port));
             if (num_bytes < 0) {
                 perror("Error reading from socket");
                 exit(EXIT_FAILURE);
             }
 
-            // Drop a packet with probability PDR
-            int res = (rand() <  (double) PDR * ((double)RAND_MAX + 1.0));
-            if (res == 1) {
-                // Drop this packet
-                // Don't send anything
-                printf("Dropped packet with seq_no: %lu\n", ntohll(recv_packet.header.seq_no));
+            seq_no = ntohll(recv_packet.header.seq_no);
+            uint64_t pkt_size = ntohll(recv_packet.header.size);
+            if (recv_packet.header.is_last != 1) {
+                fseek(fp, seq_no, SEEK_SET);
+                fwrite(recv_packet.data, 1, pkt_size, fp);
             }
-            else {
-                seq_no = ntohll(recv_packet.header.seq_no);
-                uint64_t pkt_size = ntohll(recv_packet.header.size);
-                if (recv_packet.header.is_last != 1) {
-                    // I have no clue what you meant by handling out of order reception
-                    // with buffering, when you mentioned you cannot write to the file using
-                    // a buffer. So I'm simply moving the pointer position based on the offset
-                    fseek(fp, seq_no, SEEK_SET);
-                    fwrite(recv_packet.data, 1, pkt_size, fp);
-                }
-                is_last = recv_packet.header.is_last;
-                if (is_last == 0)
-                    printf("Received Packet: Seq. No. %lu of size %lu Bytes from Channel %d\n", seq_no, pkt_size, recv_packet.header.channel_id);
-                else
-                    printf("Received FIN Packet: Seq. No. %lu from Channel %d\n", seq_no, recv_packet.header.channel_id);
-                Packet send_packet = recv_packet;
-                send_packet.header.seq_no = htonll(seq_no);
-                send_packet.header.type = 1; // Sending ACK
-                num_bytes = sendto(listenfd, &send_packet, sizeof(Packet), 0, (struct sockaddr*)&cli_addr, addr_len);
-                if (num_bytes < 0) {
-                    perror("Error writing to socket");
-                    exit(EXIT_FAILURE);
-                }
-                if (is_last == 0)
-                    printf("Sent ACK: For packet with Seq. No. %lu from channel %d\n", seq_no, send_packet.header.channel_id);
-                else
-                    printf("Sent FIN ACK: For packet with Seq. No. %lu from channel %d\n", seq_no, send_packet.header.channel_id);
-                if (seq_no > last_seq_no) last_seq_no = seq_no;
+            is_last = recv_packet.header.is_last;
+            if (is_last == 0)
+                printf("Received Packet: Seq. No. %lu of size %lu Bytes from Channel %d\n", seq_no, pkt_size, recv_packet.header.channel_id);
+            else
+                printf("Received FIN Packet: Seq. No. %lu from Channel %d\n", seq_no, recv_packet.header.channel_id);
+            Packet send_packet = recv_packet;
+            send_packet.header.seq_no = htonll(seq_no);
+            send_packet.header.type = 1; // Sending ACK
+            num_bytes = sendto(listenfd, &send_packet, sizeof(Packet), 0, (struct sockaddr*)&cli_addr, addr_len);
+            if (num_bytes < 0) {
+                perror("Error writing to socket");
+                exit(EXIT_FAILURE);
             }
+            if (is_last == 0)
+                printf("Sent ACK: For packet with Seq. No. %lu from channel %d\n", seq_no, send_packet.header.channel_id);
+            else
+                printf("Sent FIN ACK: For packet with Seq. No. %lu from channel %d\n", seq_no, send_packet.header.channel_id);
+            if (seq_no > last_seq_no) last_seq_no = seq_no;
         }
     }
     fclose(fp);

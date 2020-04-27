@@ -1,7 +1,7 @@
 all:
-	gcc -o client.out client.c
-	gcc -o server.out server.c
-	gcc -o relays.out relays.c
+	gcc -o client.out client.c linked_list.c
+	gcc -o server.out server.c linked_list.c
+	gcc -o relays.out relays.c linked_list.c
 
 clean:
 	rm client.out server.out

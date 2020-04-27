@@ -20,6 +20,7 @@
 #include <arpa/inet.h>
 #include <sys/time.h>
 #include <time.h>
+#include "linked_list.h"
 
 // Set it to whatever size you want
 #define PACKET_SIZE 5
